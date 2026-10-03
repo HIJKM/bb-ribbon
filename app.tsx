@@ -10,14 +10,19 @@ import {
 } from "@get-bb/plugin-sdk/app";
 import { fitVisibleCount, readCssPx } from "./ribbon-fit";
 
-function RibbonNavigation(_props: ExperimentalSidebarNavigationProps) {
+function RibbonNavigation({ isCompactViewport }: ExperimentalSidebarNavigationProps) {
   const { actions, activeItemId, isShortcutModifierHeld, items } =
     experimental_useSidebarNavigation();
   const railRef = useRef<HTMLDivElement>(null);
-  useRibbonPlacement(railRef, items.length > 0);
+  useRibbonPlacement(railRef, items.length > 0, isCompactViewport);
   const visible = items.filter((item) => item.isVisible);
   const hidden = items.filter((item) => !item.isVisible);
-  const fitted = useFittedCount(railRef, visible.length, hidden.length > 0, "y");
+  const fitted = useFittedCount(
+    railRef,
+    visible.length,
+    hidden.length > 0,
+    isCompactViewport ? "x" : "y",
+  );
   const shown = visible.slice(0, fitted);
   const overflow = [...visible.slice(fitted), ...hidden];
 
@@ -29,14 +34,19 @@ function RibbonNavigation(_props: ExperimentalSidebarNavigationProps) {
       data-bb-sidebar-ribbon=""
       role="toolbar"
       aria-label="Sidebar"
-      data-ribbon-axis="y"
-      className="flex h-full min-h-0 w-full flex-col items-center gap-0.5 overflow-hidden border-r border-sidebar-border/25 bg-sidebar py-1"
+      data-ribbon-axis={isCompactViewport ? "x" : "y"}
+      className={
+        isCompactViewport
+          ? "flex h-auto w-full min-w-0 flex-row items-center gap-0 overflow-hidden bg-sidebar py-1 pl-[12px] pr-2"
+          : "flex h-full min-h-0 w-full flex-col items-center gap-0.5 overflow-hidden border-r border-sidebar-border/25 bg-sidebar py-1"
+      }
     >
       {shown.map((item) => (
         <RibbonButton
           key={item.id}
           item={item}
           isActive={item.id === activeItemId && item.action.kind !== "new-thread"}
+          isCompactViewport={isCompactViewport}
           showShortcut={isShortcutModifierHeld}
           onActivate={(openInSplit) => actions.activate(item.id, { openInSplit })}
         />
@@ -44,6 +54,8 @@ function RibbonNavigation(_props: ExperimentalSidebarNavigationProps) {
       {overflow.length > 0 ? (
         <RibbonOverflow
           items={overflow}
+          isCompactViewport={isCompactViewport}
+          openBelow={isCompactViewport}
           onActivate={(itemId, openInSplit) => {
             actions.activate(itemId, { openInSplit });
           }}
@@ -70,6 +82,7 @@ const STYLE_PROPS = [
 function useRibbonPlacement(
   railRef: RefObject<HTMLDivElement | null>,
   active: boolean,
+  isCompactViewport: boolean,
 ) {
   const homeRef = useRef<{ parent: Node; next: ChildNode | null } | null>(null);
   const originalsRef = useRef(new Map<HTMLElement, Map<string, string>>());
@@ -98,6 +111,16 @@ function useRibbonPlacement(
     if (!rail) return;
 
     const apply = () => {
+      if (isCompactViewport) {
+        restorePlacement(rail, homeRef.current, originalsRef.current);
+        const nav = rail.closest<HTMLElement>('[data-testid="sidebar-navigation-region"]');
+        if (nav) {
+          rememberStyle(originalsRef.current, nav);
+          nav.style.minWidth = "0";
+        }
+        return;
+      }
+
       const host = findRailHost(rail);
       if (!host) return;
       // An inline display beats the hidden attribute and would show the app
@@ -144,6 +167,7 @@ function useRibbonPlacement(
     };
 
     apply();
+    if (isCompactViewport) return;
     const shell = rail.closest('[data-sidebar="sidebar"]');
     const observer = new MutationObserver(apply);
     if (shell) {
@@ -155,6 +179,20 @@ function useRibbonPlacement(
     }
     return () => observer.disconnect();
   });
+}
+
+function restorePlacement(
+  rail: HTMLElement,
+  home: { parent: Node; next: ChildNode | null } | null,
+  originals: Map<HTMLElement, Map<string, string>>,
+) {
+  if (home?.parent.isConnected && rail.parentNode !== home.parent) {
+    const next = home.next?.parentNode === home.parent ? home.next : null;
+    home.parent.insertBefore(rail, next);
+  }
+  for (const [element, snapshot] of originals) {
+    for (const [property, value] of snapshot) element.style.setProperty(property, value);
+  }
 }
 
 /** Desktop host: the element whose direct children are the header, content, and footer. */
@@ -217,10 +255,16 @@ function readFittedCount(
     available,
     padding,
     gap,
-    itemSize: sampleSlotSize(rail, axis),
+    itemSize: axis === "x" ? compactSlotMinPx() : sampleSlotSize(rail, axis),
     itemCount,
     reserveOverflow,
   });
+}
+
+/** `size-9` is 2.25rem. The laid-out width is larger once slots share the row, so measuring it would drop a slot on the next pass. */
+function compactSlotMinPx(): number {
+  const root = readCssPx(getComputedStyle(document.documentElement).fontSize);
+  return root > 0 ? root * 2.25 : 36;
 }
 
 function sampleSlotSize(rail: HTMLElement, axis: "x" | "y"): number {
@@ -254,11 +298,13 @@ function place(
 function RibbonButton({
   item,
   isActive,
+  isCompactViewport,
   showShortcut,
   onActivate,
 }: {
   item: ExperimentalSidebarNavigationItem;
   isActive: boolean;
+  isCompactViewport: boolean;
   showShortcut: boolean;
   onActivate: (openInSplit: boolean) => void;
 }) {
@@ -277,19 +323,23 @@ function RibbonButton({
       {...splitProps}
       onClick={(event) => onActivate(event.metaKey || event.ctrlKey)}
       data-ribbon-item=""
-      className={buttonClass(isActive, item.isLoading)}
+      className={buttonClass(isActive, item.isLoading, isCompactViewport)}
     >
-      <NavigationIcon icon={item.icon} className="size-4" />
+      <NavigationIcon icon={item.icon} className={glyphClass(isCompactViewport)} />
     </button>
   );
 }
 
 function RibbonOverflow({
   items,
+  isCompactViewport,
+  openBelow,
   onActivate,
   onCustomize,
 }: {
   items: readonly ExperimentalSidebarNavigationItem[];
+  isCompactViewport: boolean;
+  openBelow: boolean;
   onActivate: (itemId: string, openInSplit: boolean) => void;
   onCustomize: () => void;
 }) {
@@ -313,7 +363,10 @@ function RibbonOverflow({
   }, [open]);
 
   return (
-    <div ref={rootRef} className="relative shrink-0">
+    <div
+      ref={rootRef}
+      className={isCompactViewport ? "relative h-9 min-w-9 flex-1" : "relative shrink-0"}
+    >
       <button
         type="button"
         aria-label="More sidebar navigation"
@@ -321,16 +374,25 @@ function RibbonOverflow({
         title="More"
         onClick={() => setOpen((value) => !value)}
         data-ribbon-overflow=""
-        className={buttonClass(open, false)}
+        className={buttonClass(
+          open,
+          false,
+          isCompactViewport,
+          isCompactViewport ? "h-full w-full" : undefined,
+        )}
       >
-        <Icon name="MoreHorizontal" className="size-4" aria-hidden="true" />
+        <Icon
+          name="MoreHorizontal"
+          className={glyphClass(isCompactViewport)}
+          aria-hidden="true"
+        />
       </button>
       {open ? (
         <div
           role="menu"
           aria-label="More navigation"
           className="fixed z-30 min-w-44 overflow-y-auto rounded-md border border-border bg-popover p-1 text-xs text-popover-foreground shadow-md"
-          style={menuStyle(rootRef.current)}
+          style={menuStyle(rootRef.current, openBelow)}
         >
           {items.map((item) => (
             <OverflowRow
@@ -407,7 +469,7 @@ function MenuButton({
   );
 }
 
-function menuStyle(root: HTMLDivElement | null): CSSProperties {
+function menuStyle(root: HTMLDivElement | null, openBelow: boolean): CSSProperties {
   const button = root?.querySelector("button");
   if (!(button instanceof HTMLElement) || typeof window === "undefined") {
     return { top: 0, left: 0, maxHeight: 240 };
@@ -415,16 +477,35 @@ function menuStyle(root: HTMLDivElement | null): CSSProperties {
   const rect = button.getBoundingClientRect();
   const margin = 8;
   const maxHeight = Math.min(320, window.innerHeight - margin * 2);
-  const top = Math.min(Math.max(margin, rect.top), window.innerHeight - margin - maxHeight);
-  return { top, left: rect.right + 6, maxHeight };
+  if (!openBelow) {
+    const top = Math.min(Math.max(margin, rect.top), window.innerHeight - margin - maxHeight);
+    return { top, left: rect.right + 6, maxHeight };
+  }
+  const bounds = button.closest('[data-sidebar="sidebar"]')?.getBoundingClientRect();
+  const minLeft = (bounds?.left ?? 0) + margin;
+  const maxRight = (bounds?.right ?? window.innerWidth) - margin;
+  const width = Math.min(220, Math.max(0, maxRight - minLeft));
+  const left = Math.max(minLeft, Math.min(rect.left, maxRight - width));
+  const top = Math.min(rect.bottom + 6, Math.max(margin, window.innerHeight - margin - maxHeight));
+  return { top, left, maxHeight, maxWidth: width };
 }
 
-function buttonClass(isActive: boolean, isLoading: boolean) {
+function buttonClass(
+  isActive: boolean,
+  isLoading: boolean,
+  isCompactViewport: boolean,
+  box?: string,
+) {
+  const size = box ?? (isCompactViewport ? "h-9 min-w-9 flex-1" : "size-7 shrink-0");
   const tone = isActive
     ? "bg-sidebar-accent text-sidebar-foreground"
     : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground";
   const loading = isLoading ? "opacity-55" : "";
-  return `grid size-7 shrink-0 place-items-center rounded ${tone} ${loading}`;
+  return `grid ${size} place-items-center rounded ${tone} ${loading}`;
+}
+
+function glyphClass(isCompactViewport: boolean) {
+  return isCompactViewport ? "size-5" : "size-4";
 }
 
 function itemLabel(item: ExperimentalSidebarNavigationItem, showShortcut: boolean) {
@@ -436,7 +517,7 @@ export default definePluginApp((app) => {
   app.slots.experimental_sidebarNavigation({
     id: "ribbon",
     title: "Ribbon",
-    description: "사이드바를 왼쪽 세로 아이콘 리본으로 둔다.",
+    description: "데스크톱은 왼쪽 세로 리본, 모바일은 상단 가로 아이콘이다.",
     component: RibbonNavigation,
   });
 });

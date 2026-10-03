@@ -8,7 +8,7 @@
   },
   "bb": {
     "name": "Ribbon",
-    "description": "사이드바를 왼쪽 세로 아이콘 리본으로 둔다.",
+    "description": "데스크톱은 왼쪽 세로 리본, 모바일은 상단 가로 아이콘이다.",
     "branding": {
       "icon": "PanelLeft"
     },
