@@ -1,0 +1,442 @@
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import {
+  definePluginApp,
+  experimental_Icon as Icon,
+  experimental_SidebarNavigationIcon as NavigationIcon,
+  experimental_useSidebarNavigation,
+  experimental_useSidebarNavigationSplit,
+  type ExperimentalSidebarNavigationItem,
+  type ExperimentalSidebarNavigationProps,
+} from "@get-bb/plugin-sdk/app";
+import { fitVisibleCount, readCssPx } from "./ribbon-fit";
+
+function RibbonNavigation(_props: ExperimentalSidebarNavigationProps) {
+  const { actions, activeItemId, isShortcutModifierHeld, items } =
+    experimental_useSidebarNavigation();
+  const railRef = useRef<HTMLDivElement>(null);
+  useRibbonPlacement(railRef, items.length > 0);
+  const visible = items.filter((item) => item.isVisible);
+  const hidden = items.filter((item) => !item.isVisible);
+  const fitted = useFittedCount(railRef, visible.length, hidden.length > 0, "y");
+  const shown = visible.slice(0, fitted);
+  const overflow = [...visible.slice(fitted), ...hidden];
+
+  if (items.length === 0) return null;
+
+  return (
+    <div
+      ref={railRef}
+      data-bb-sidebar-ribbon=""
+      role="toolbar"
+      aria-label="Sidebar"
+      data-ribbon-axis="y"
+      className="flex h-full min-h-0 w-full flex-col items-center gap-0.5 overflow-hidden border-r border-sidebar-border/25 bg-sidebar py-1"
+    >
+      {shown.map((item) => (
+        <RibbonButton
+          key={item.id}
+          item={item}
+          isActive={item.id === activeItemId && item.action.kind !== "new-thread"}
+          showShortcut={isShortcutModifierHeld}
+          onActivate={(openInSplit) => actions.activate(item.id, { openInSplit })}
+        />
+      ))}
+      {overflow.length > 0 ? (
+        <RibbonOverflow
+          items={overflow}
+          onActivate={(itemId, openInSplit) => {
+            actions.activate(itemId, { openInSplit });
+          }}
+          onCustomize={() => actions.openCustomize()}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+const RAIL_COLUMN = "2.5rem";
+const STYLE_PROPS = [
+  "display",
+  "grid-template-columns",
+  "grid-template-rows",
+  "flex-direction",
+  "padding-left",
+  "grid-column",
+  "grid-row",
+  "min-width",
+  "min-height",
+] as const;
+
+function useRibbonPlacement(
+  railRef: RefObject<HTMLDivElement | null>,
+  active: boolean,
+) {
+  const homeRef = useRef<{ parent: Node; next: ChildNode | null } | null>(null);
+  const originalsRef = useRef(new Map<HTMLElement, Map<string, string>>());
+
+  useLayoutEffect(() => {
+    if (!active) return;
+    const rail = railRef.current;
+    if (!rail?.parentNode) return;
+    homeRef.current = { parent: rail.parentNode, next: rail.nextSibling };
+
+    return () => {
+      for (const [element, snapshot] of originalsRef.current) {
+        for (const [property, value] of snapshot) element.style.setProperty(property, value);
+      }
+      originalsRef.current.clear();
+      const home = homeRef.current;
+      const node = railRef.current;
+      if (node && home?.parent.isConnected) home.parent.insertBefore(node, home.next);
+      homeRef.current = null;
+    };
+  }, [active, railRef]);
+
+  useLayoutEffect(() => {
+    if (!active) return;
+    const rail = railRef.current;
+    if (!rail) return;
+
+    const apply = () => {
+      const host = findRailHost(rail);
+      if (!host) return;
+      // An inline display beats the hidden attribute and would show the app
+      // sidebar over Settings on a phone.
+      if (host.hasAttribute("hidden")) {
+        if (host.style.display === "grid") host.style.display = "";
+        return;
+      }
+
+      const header = host.querySelector<HTMLElement>(
+        ':scope > [data-testid="app-sidebar-top-reserve-row"]',
+      );
+      const content = host.querySelector<HTMLElement>(':scope > [data-sidebar="content"]');
+      const footer = host.querySelector<HTMLElement>(':scope > [data-sidebar="footer"]');
+      if (!header || !content || !footer) return;
+
+      if (rail.parentElement !== host) host.prepend(rail);
+
+      rememberStyle(originalsRef.current, host);
+      host.style.display = "grid";
+      host.style.gridTemplateColumns = `${RAIL_COLUMN} minmax(0, 1fr)`;
+      host.style.gridTemplateRows = "auto minmax(0, 1fr) auto";
+      host.style.flexDirection = "";
+      host.style.paddingLeft = "";
+      host.style.minHeight = "0";
+
+      place(originalsRef.current, header, "1 / -1", "1");
+      place(originalsRef.current, rail, "1", "2 / -1");
+      rail.style.minHeight = "0";
+      place(originalsRef.current, content, "2", "2");
+      content.style.minWidth = "0";
+      content.style.minHeight = "0";
+      place(originalsRef.current, footer, "2", "3");
+
+      for (const selector of [
+        ':scope > [data-testid="sidebar-navigation-region"]',
+        ':scope > [data-testid="app-sidebar-navigation-divider"]',
+      ]) {
+        const extra = host.querySelector<HTMLElement>(selector);
+        if (!extra) continue;
+        rememberStyle(originalsRef.current, extra);
+        extra.style.display = "none";
+      }
+    };
+
+    apply();
+    const shell = rail.closest('[data-sidebar="sidebar"]');
+    const observer = new MutationObserver(apply);
+    if (shell) {
+      observer.observe(shell, {
+        attributes: true,
+        subtree: true,
+        attributeFilter: ["hidden"],
+      });
+    }
+    return () => observer.disconnect();
+  });
+}
+
+/** Desktop host: the element whose direct children are the header, content, and footer. */
+function findRailHost(rail: HTMLElement): HTMLElement | null {
+  let node = rail.parentElement;
+  while (node) {
+    const header = node.querySelector(":scope > [data-testid='app-sidebar-top-reserve-row']");
+    const content = node.querySelector(':scope > [data-sidebar="content"]');
+    const footer = node.querySelector(':scope > [data-sidebar="footer"]');
+    if (header && content && footer) return node;
+    node = node.parentElement;
+  }
+  return null;
+}
+
+function useFittedCount(
+  railRef: RefObject<HTMLDivElement | null>,
+  itemCount: number,
+  reserveOverflow: boolean,
+  axis: "x" | "y",
+) {
+  const [count, setCount] = useState(itemCount);
+
+  useLayoutEffect(() => {
+    const rail = railRef.current;
+    if (!rail) return;
+
+    const measure = () => {
+      const next = readFittedCount(rail, itemCount, reserveOverflow, axis);
+      if (next === null) return;
+      setCount((current) => (current === next ? current : next));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(rail);
+    return () => observer.disconnect();
+  }, [axis, itemCount, railRef, reserveOverflow]);
+
+  return Math.min(count, itemCount);
+}
+
+function readFittedCount(
+  rail: HTMLElement,
+  itemCount: number,
+  reserveOverflow: boolean,
+  axis: "x" | "y",
+): number | null {
+  const style = getComputedStyle(rail);
+  const available = axis === "x" ? rail.clientWidth : rail.clientHeight;
+  if (available === 0) return null;
+  const padding =
+    axis === "x"
+      ? readCssPx(style.paddingLeft) + readCssPx(style.paddingRight)
+      : readCssPx(style.paddingTop) + readCssPx(style.paddingBottom);
+  const gap =
+    axis === "x"
+      ? readCssPx(style.columnGap) || readCssPx(style.gap)
+      : readCssPx(style.rowGap) || readCssPx(style.gap);
+  return fitVisibleCount({
+    available,
+    padding,
+    gap,
+    itemSize: sampleSlotSize(rail, axis),
+    itemCount,
+    reserveOverflow,
+  });
+}
+
+function sampleSlotSize(rail: HTMLElement, axis: "x" | "y"): number {
+  const field = axis === "x" ? "offsetWidth" : "offsetHeight";
+  const item = rail.querySelector<HTMLElement>("[data-ribbon-item]");
+  if (item) return item[field];
+  const overflow = rail.querySelector<HTMLElement>("[data-ribbon-overflow]");
+  const slot = overflow?.parentElement;
+  if (slot && slot.parentElement === rail) return slot[field];
+  return overflow?.[field] ?? 0;
+}
+
+function rememberStyle(originals: Map<HTMLElement, Map<string, string>>, element: HTMLElement) {
+  if (originals.has(element)) return;
+  const snapshot = new Map<string, string>();
+  for (const property of STYLE_PROPS) snapshot.set(property, element.style.getPropertyValue(property));
+  originals.set(element, snapshot);
+}
+
+function place(
+  originals: Map<HTMLElement, Map<string, string>>,
+  element: HTMLElement,
+  column: string,
+  row: string,
+) {
+  rememberStyle(originals, element);
+  element.style.gridColumn = column;
+  element.style.gridRow = row;
+}
+
+function RibbonButton({
+  item,
+  isActive,
+  showShortcut,
+  onActivate,
+}: {
+  item: ExperimentalSidebarNavigationItem;
+  isActive: boolean;
+  showShortcut: boolean;
+  onActivate: (openInSplit: boolean) => void;
+}) {
+  const { splitProps } = experimental_useSidebarNavigationSplit(item.id);
+  const label = itemLabel(item, showShortcut);
+
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      aria-current={isActive ? "page" : undefined}
+      aria-busy={item.isLoading || undefined}
+      aria-keyshortcuts={item.shortcut?.ariaKeyShortcuts}
+      disabled={item.isDisabled}
+      {...splitProps}
+      onClick={(event) => onActivate(event.metaKey || event.ctrlKey)}
+      data-ribbon-item=""
+      className={buttonClass(isActive, item.isLoading)}
+    >
+      <NavigationIcon icon={item.icon} className="size-4" />
+    </button>
+  );
+}
+
+function RibbonOverflow({
+  items,
+  onActivate,
+  onCustomize,
+}: {
+  items: readonly ExperimentalSidebarNavigationItem[];
+  onActivate: (itemId: string, openInSplit: boolean) => void;
+  onCustomize: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative shrink-0">
+      <button
+        type="button"
+        aria-label="More sidebar navigation"
+        aria-expanded={open}
+        title="More"
+        onClick={() => setOpen((value) => !value)}
+        data-ribbon-overflow=""
+        className={buttonClass(open, false)}
+      >
+        <Icon name="MoreHorizontal" className="size-4" aria-hidden="true" />
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          aria-label="More navigation"
+          className="fixed z-30 min-w-44 overflow-y-auto rounded-md border border-border bg-popover p-1 text-xs text-popover-foreground shadow-md"
+          style={menuStyle(rootRef.current)}
+        >
+          {items.map((item) => (
+            <OverflowRow
+              key={item.id}
+              item={item}
+              onDragStart={() => setOpen(false)}
+              onActivate={(openInSplit) => {
+                setOpen(false);
+                onActivate(item.id, openInSplit);
+              }}
+            />
+          ))}
+          <div className="my-1 h-px bg-border" />
+          <MenuButton
+            onClick={() => {
+              setOpen(false);
+              onCustomize();
+            }}
+          >
+            Customize sidebar
+          </MenuButton>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function OverflowRow({
+  item,
+  onActivate,
+  onDragStart,
+}: {
+  item: ExperimentalSidebarNavigationItem;
+  onActivate: (openInSplit: boolean) => void;
+  onDragStart: () => void;
+}) {
+  const { splitProps } = experimental_useSidebarNavigationSplit(item.id, {
+    activation: "distance",
+    onDragStart,
+  });
+
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      disabled={item.isDisabled}
+      aria-busy={item.isLoading || undefined}
+      {...splitProps}
+      onClick={(event) => onActivate(event.metaKey || event.ctrlKey)}
+      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+    >
+      <NavigationIcon icon={item.icon} className="size-4 shrink-0" />
+      <span className="min-w-0 flex-1 truncate">{item.label}</span>
+    </button>
+  );
+}
+
+function MenuButton({
+  children,
+  onClick,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className="flex w-full rounded px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground"
+    >
+      {children}
+    </button>
+  );
+}
+
+function menuStyle(root: HTMLDivElement | null): CSSProperties {
+  const button = root?.querySelector("button");
+  if (!(button instanceof HTMLElement) || typeof window === "undefined") {
+    return { top: 0, left: 0, maxHeight: 240 };
+  }
+  const rect = button.getBoundingClientRect();
+  const margin = 8;
+  const maxHeight = Math.min(320, window.innerHeight - margin * 2);
+  const top = Math.min(Math.max(margin, rect.top), window.innerHeight - margin - maxHeight);
+  return { top, left: rect.right + 6, maxHeight };
+}
+
+function buttonClass(isActive: boolean, isLoading: boolean) {
+  const tone = isActive
+    ? "bg-sidebar-accent text-sidebar-foreground"
+    : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground";
+  const loading = isLoading ? "opacity-55" : "";
+  return `grid size-7 shrink-0 place-items-center rounded ${tone} ${loading}`;
+}
+
+function itemLabel(item: ExperimentalSidebarNavigationItem, showShortcut: boolean) {
+  if (showShortcut && item.shortcut) return `${item.label} (${item.shortcut.label})`;
+  return item.label;
+}
+
+export default definePluginApp((app) => {
+  app.slots.experimental_sidebarNavigation({
+    id: "ribbon",
+    title: "Ribbon",
+    description: "사이드바를 왼쪽 세로 아이콘 리본으로 둔다.",
+    component: RibbonNavigation,
+  });
+});
