@@ -36,6 +36,20 @@ describe("fitVisibleCount", () => {
     );
   });
 
+  it("keeps every desktop item when the rendered rail is tall enough", () => {
+    assert.equal(
+      fitVisibleCount({
+        available: 725,
+        padding: 8,
+        gap: 2,
+        itemSize: 28,
+        itemCount: 12,
+        reserveOverflow: true,
+      }),
+      12,
+    );
+  });
+
   it("drops one visible item when hidden items need the overflow button", () => {
     assert.equal(
       fitVisibleCount({

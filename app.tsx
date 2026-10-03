@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import {
   definePluginApp,
   experimental_Icon as Icon,
@@ -38,7 +39,7 @@ function RibbonNavigation({ isCompactViewport }: ExperimentalSidebarNavigationPr
       className={
         isCompactViewport
           ? "flex h-auto w-full min-w-0 flex-row items-center gap-0 overflow-hidden bg-sidebar py-1 pl-[12px] pr-2"
-          : "flex h-full min-h-0 w-full flex-col items-center gap-0.5 overflow-hidden border-r border-sidebar-border/25 bg-sidebar py-1"
+          : "flex min-h-0 w-full flex-col items-center gap-0.5 self-stretch overflow-hidden border-r border-sidebar-border/25 bg-sidebar py-1"
       }
     >
       {shown.map((item) => (
@@ -49,6 +50,7 @@ function RibbonNavigation({ isCompactViewport }: ExperimentalSidebarNavigationPr
           isCompactViewport={isCompactViewport}
           showShortcut={isShortcutModifierHeld}
           onActivate={(openInSplit) => actions.activate(item.id, { openInSplit })}
+          onCustomize={() => actions.openCustomize()}
         />
       ))}
       {overflow.length > 0 ? (
@@ -77,6 +79,7 @@ const STYLE_PROPS = [
   "grid-row",
   "min-width",
   "min-height",
+  "border",
 ] as const;
 
 function useRibbonPlacement(
@@ -133,32 +136,50 @@ function useRibbonPlacement(
       const header = host.querySelector<HTMLElement>(
         ':scope > [data-testid="app-sidebar-top-reserve-row"]',
       );
+      const nav = host.querySelector<HTMLElement>(
+        ':scope > [data-testid="sidebar-navigation-region"]',
+      );
       const content = host.querySelector<HTMLElement>(':scope > [data-sidebar="content"]');
       const footer = host.querySelector<HTMLElement>(':scope > [data-sidebar="footer"]');
-      if (!header || !content || !footer) return;
+      if (!header || !nav || !content || !footer) return;
+      const isCustomizing = nav.querySelector(
+        '[data-sidebar-navigation-customize-mode="true"]',
+      ) !== null;
+      const customizer = nav.querySelector<HTMLElement>(
+        '[data-testid="sidebar-navigation-customize-inline"]',
+      );
 
       if (rail.parentElement !== host) host.prepend(rail);
 
       rememberStyle(originalsRef.current, host);
       host.style.display = "grid";
       host.style.gridTemplateColumns = `${RAIL_COLUMN} minmax(0, 1fr)`;
-      host.style.gridTemplateRows = "auto minmax(0, 1fr) auto";
+      host.style.gridTemplateRows = "auto auto minmax(0, 1fr) auto";
       host.style.flexDirection = "";
       host.style.paddingLeft = "";
       host.style.minHeight = "0";
 
       place(originalsRef.current, header, "1 / -1", "1");
       place(originalsRef.current, rail, "1", "2 / -1");
-      rail.style.minHeight = "0";
-      place(originalsRef.current, content, "2", "2");
+      // Keep the host navigation region in the grid. bb renders its native
+      // Customize editor inside this region when `openCustomize()` is called.
+      place(originalsRef.current, nav, isCustomizing ? "2 / 4" : "2", "2");
+      place(originalsRef.current, content, "2", "3");
+      if (isCustomizing) {
+        rememberStyle(originalsRef.current, content);
+        content.style.display = "none";
+        if (customizer) {
+          rememberStyle(originalsRef.current, customizer);
+          customizer.style.border = "none";
+        }
+      } else {
+        restoreProperty(originalsRef.current, content, "display");
+      }
       content.style.minWidth = "0";
       content.style.minHeight = "0";
-      place(originalsRef.current, footer, "2", "3");
+      place(originalsRef.current, footer, "2", "4");
 
-      for (const selector of [
-        ':scope > [data-testid="sidebar-navigation-region"]',
-        ':scope > [data-testid="app-sidebar-navigation-divider"]',
-      ]) {
+      for (const selector of [':scope > [data-testid="app-sidebar-navigation-divider"]']) {
         const extra = host.querySelector<HTMLElement>(selector);
         if (!extra) continue;
         rememberStyle(originalsRef.current, extra);
@@ -174,7 +195,8 @@ function useRibbonPlacement(
       observer.observe(shell, {
         attributes: true,
         subtree: true,
-        attributeFilter: ["hidden"],
+        attributeFilter: ["hidden", "data-sidebar-navigation-customize-mode"],
+        childList: true,
       });
     }
     return () => observer.disconnect();
@@ -228,6 +250,10 @@ function useFittedCount(
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(rail);
+    const host = findRailHost(rail);
+    if (host) observer.observe(host);
+    const panel = host?.closest<HTMLElement>("[data-sidebar='panel']");
+    if (panel) observer.observe(panel);
     return () => observer.disconnect();
   }, [axis, itemCount, railRef, reserveOverflow]);
 
@@ -255,7 +281,7 @@ function readFittedCount(
     available,
     padding,
     gap,
-    itemSize: axis === "x" ? compactSlotMinPx() : sampleSlotSize(rail, axis),
+    itemSize: axis === "x" ? compactSlotMinPx() : desktopSlotMinPx(),
     itemCount,
     reserveOverflow,
   });
@@ -263,18 +289,17 @@ function readFittedCount(
 
 /** `size-9` is 2.25rem. The laid-out width is larger once slots share the row, so measuring it would drop a slot on the next pass. */
 function compactSlotMinPx(): number {
-  const root = readCssPx(getComputedStyle(document.documentElement).fontSize);
-  return root > 0 ? root * 2.25 : 36;
+  return rootRemPx(2.25, 36);
 }
 
-function sampleSlotSize(rail: HTMLElement, axis: "x" | "y"): number {
-  const field = axis === "x" ? "offsetWidth" : "offsetHeight";
-  const item = rail.querySelector<HTMLElement>("[data-ribbon-item]");
-  if (item) return item[field];
-  const overflow = rail.querySelector<HTMLElement>("[data-ribbon-overflow]");
-  const slot = overflow?.parentElement;
-  if (slot && slot.parentElement === rail) return slot[field];
-  return overflow?.[field] ?? 0;
+/** `size-7` is 1.75rem. A stretched desktop button would shrink the next fit. */
+function desktopSlotMinPx(): number {
+  return rootRemPx(1.75, 28);
+}
+
+function rootRemPx(rem: number, fallback: number): number {
+  const root = readCssPx(getComputedStyle(document.documentElement).fontSize);
+  return root > 0 ? root * rem : fallback;
 }
 
 function rememberStyle(originals: Map<HTMLElement, Map<string, string>>, element: HTMLElement) {
@@ -282,6 +307,15 @@ function rememberStyle(originals: Map<HTMLElement, Map<string, string>>, element
   const snapshot = new Map<string, string>();
   for (const property of STYLE_PROPS) snapshot.set(property, element.style.getPropertyValue(property));
   originals.set(element, snapshot);
+}
+
+function restoreProperty(
+  originals: Map<HTMLElement, Map<string, string>>,
+  element: HTMLElement,
+  property: string,
+) {
+  const original = originals.get(element)?.get(property) ?? "";
+  element.style.setProperty(property, original);
 }
 
 function place(
@@ -295,38 +329,166 @@ function place(
   element.style.gridRow = row;
 }
 
+function RibbonNamePopover({
+  label,
+  anchor,
+  id,
+}: {
+  label: string;
+  anchor: HTMLElement;
+  id: string;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState<{ top: number; left: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const place = () => {
+      const tip = ref.current;
+      if (!tip) return;
+      const button = anchor.getBoundingClientRect();
+      const tipBox = tip.getBoundingClientRect();
+      const margin = 8;
+      let top = button.top + button.height / 2 - tipBox.height / 2;
+      const maxTop = window.innerHeight - margin - tipBox.height;
+      top = Math.min(Math.max(margin, top), Math.max(margin, maxTop));
+      let left = button.right + 8;
+      if (left + tipBox.width > window.innerWidth - margin) {
+        left = Math.max(margin, button.left - margin - tipBox.width);
+      }
+      setBox((prev) => (prev && prev.top === top && prev.left === left ? prev : { top, left }));
+    };
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [anchor, label]);
+
+  return (
+    <div
+      ref={ref}
+      id={id}
+      role="tooltip"
+      style={{ top: box?.top ?? 0, left: box?.left ?? 0, visibility: box ? "visible" : "hidden" }}
+      className="pointer-events-none fixed z-50 max-w-60 truncate rounded-md border border-border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-md"
+    >
+      {label}
+    </div>
+  );
+}
+
 function RibbonButton({
   item,
   isActive,
   isCompactViewport,
   showShortcut,
   onActivate,
+  onCustomize,
 }: {
   item: ExperimentalSidebarNavigationItem;
   isActive: boolean;
   isCompactViewport: boolean;
   showShortcut: boolean;
   onActivate: (openInSplit: boolean) => void;
+  onCustomize: () => void;
 }) {
   const { splitProps } = experimental_useSidebarNavigationSplit(item.id);
   const label = itemLabel(item, showShortcut);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const tipId = useId();
+  const [hover, setHover] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ left: number; top: number } | null>(null);
+  const showTip = hover && !isCompactViewport && buttonRef.current !== null;
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest(`[data-ribbon-item-menu="${tipId}"]`)) {
+        setContextMenu(null);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setContextMenu(null);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [contextMenu, tipId]);
+
+  const openContextMenu = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    const margin = 8;
+    const width = 184;
+    const height = 40;
+    const anchor = buttonRef.current?.getBoundingClientRect();
+    const x = event.clientX === 0 && event.clientY === 0 ? (anchor?.left ?? margin) : event.clientX;
+    const y = event.clientX === 0 && event.clientY === 0 ? (anchor?.bottom ?? margin) : event.clientY;
+    const left = Math.max(margin, Math.min(x, window.innerWidth - width - margin));
+    const top = Math.max(margin, Math.min(y, window.innerHeight - height - margin));
+    setContextMenu({ left, top });
+  };
 
   return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      aria-current={isActive ? "page" : undefined}
-      aria-busy={item.isLoading || undefined}
-      aria-keyshortcuts={item.shortcut?.ariaKeyShortcuts}
-      disabled={item.isDisabled}
-      {...splitProps}
-      onClick={(event) => onActivate(event.metaKey || event.ctrlKey)}
-      data-ribbon-item=""
-      className={buttonClass(isActive, item.isLoading, isCompactViewport)}
-    >
-      <NavigationIcon icon={item.icon} className={glyphClass(isCompactViewport)} />
-    </button>
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        title={isCompactViewport ? label : undefined}
+        aria-label={label}
+        aria-describedby={showTip ? tipId : undefined}
+        aria-current={isActive ? "page" : undefined}
+        aria-busy={item.isLoading || undefined}
+        aria-keyshortcuts={item.shortcut?.ariaKeyShortcuts}
+        disabled={item.isDisabled}
+        {...splitProps}
+        onClick={(event) => onActivate(event.metaKey || event.ctrlKey)}
+        onContextMenu={openContextMenu}
+        onMouseEnter={() => {
+          if (!isCompactViewport) setHover(true);
+        }}
+        onMouseLeave={() => setHover(false)}
+        onFocus={() => {
+          if (!isCompactViewport) setHover(true);
+        }}
+        onBlur={() => setHover(false)}
+        data-ribbon-item=""
+        className={buttonClass(isActive, item.isLoading, isCompactViewport)}
+      >
+        <NavigationIcon icon={item.icon} className={glyphClass(isCompactViewport)} />
+      </button>
+      {showTip && buttonRef.current
+        ? createPortal(
+            <RibbonNamePopover label={label} anchor={buttonRef.current} id={tipId} />,
+            document.body,
+          )
+        : null}
+      {contextMenu
+        ? createPortal(
+            <div
+              role="menu"
+              aria-label={`${label} options`}
+              data-ribbon-item-menu={tipId}
+              style={{ top: contextMenu.top, left: contextMenu.left }}
+              className="fixed z-50 min-w-44 rounded-md border border-border bg-popover p-1 text-xs text-popover-foreground shadow-md"
+            >
+              <MenuButton
+                onClick={() => {
+                  setContextMenu(null);
+                  onCustomize();
+                }}
+              >
+                Customize sidebar
+              </MenuButton>
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
   );
 }
 
@@ -496,7 +658,7 @@ function buttonClass(
   isCompactViewport: boolean,
   box?: string,
 ) {
-  const size = box ?? (isCompactViewport ? "h-9 min-w-9 flex-1" : "size-7 shrink-0");
+  const size = box ?? (isCompactViewport ? "h-9 min-w-9 flex-1" : "size-7 shrink-0 grow-0");
   const tone = isActive
     ? "bg-sidebar-accent text-sidebar-foreground"
     : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground";
