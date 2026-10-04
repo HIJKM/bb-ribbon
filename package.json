@@ -8,7 +8,7 @@
   },
   "bb": {
     "name": "Ribbon",
-    "description": "데스크톱은 왼쪽 세로 리본, 모바일은 상단 가로 아이콘이다.",
+    "description": "\ub370\uc2a4\ud06c\ud1b1\uc740 \uc67c\ucabd \uc138\ub85c \ub9ac\ubcf8, \ubaa8\ubc14\uc77c\uc740 \uc0c1\ub2e8 \uac00\ub85c \uc544\uc774\ucf58\uc774\ub2e4.",
     "branding": {
       "icon": "PanelLeft"
     },
@@ -27,5 +27,6 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "typescript": "^5.7.0"
-  }
+  },
+  "license": "MIT"
 }
