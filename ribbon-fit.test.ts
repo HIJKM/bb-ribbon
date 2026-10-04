@@ -29,6 +29,20 @@ describe("fitVisibleCount", () => {
     );
   });
 
+  it("reserves the More slot when every item would fit without it", () => {
+    assert.equal(
+      fitVisibleCount({
+        itemSize: 28,
+        gap: 2,
+        padding: 8,
+        available: 100,
+        itemCount: 3,
+        reserveOverflow: true,
+      }),
+      2,
+    );
+  });
+
   it("drops only the items that do not fit beside the overflow button", () => {
     assert.equal(
       fitVisibleCount({ ...base, available: 200, itemCount: 10 }),

@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode, type RefObject } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import {
   definePluginApp,
@@ -10,6 +10,7 @@ import {
   type ExperimentalSidebarNavigationProps,
 } from "@get-bb/plugin-sdk/app";
 import { fitVisibleCount, readCssPx } from "./ribbon-fit";
+import { postRibbonTap, readHapticBridge, ribbonTapKind } from "./ribbon-haptic";
 
 function RibbonNavigation({ isCompactViewport }: ExperimentalSidebarNavigationProps) {
   const { actions, activeItemId, isShortcutModifierHeld, items } =
@@ -21,7 +22,7 @@ function RibbonNavigation({ isCompactViewport }: ExperimentalSidebarNavigationPr
   const fitted = useFittedCount(
     railRef,
     visible.length,
-    hidden.length > 0,
+    true,
     isCompactViewport ? "x" : "y",
   );
   const shown = visible.slice(0, fitted);
@@ -53,17 +54,15 @@ function RibbonNavigation({ isCompactViewport }: ExperimentalSidebarNavigationPr
           onCustomize={() => actions.openCustomize()}
         />
       ))}
-      {overflow.length > 0 ? (
-        <RibbonOverflow
-          items={overflow}
-          isCompactViewport={isCompactViewport}
-          openBelow={isCompactViewport}
-          onActivate={(itemId, openInSplit) => {
-            actions.activate(itemId, { openInSplit });
-          }}
-          onCustomize={() => actions.openCustomize()}
-        />
-      ) : null}
+      <RibbonOverflow
+        items={overflow}
+        isCompactViewport={isCompactViewport}
+        openBelow={isCompactViewport}
+        onActivate={(itemId, openInSplit) => {
+          actions.activate(itemId, { openInSplit });
+        }}
+        onCustomize={() => actions.openCustomize()}
+      />
     </div>
   );
 }
@@ -446,6 +445,7 @@ function RibbonButton({
         aria-keyshortcuts={item.shortcut?.ariaKeyShortcuts}
         disabled={item.isDisabled}
         {...splitProps}
+        onPointerDown={composeRibbonPointerDown(isCompactViewport, splitProps.onPointerDown)}
         onClick={(event) => onActivate(event.metaKey || event.ctrlKey)}
         onContextMenu={openContextMenu}
         onMouseEnter={() => {
@@ -534,6 +534,7 @@ function RibbonOverflow({
         aria-label="More sidebar navigation"
         aria-expanded={open}
         title="More"
+        onPointerDown={composeRibbonPointerDown(isCompactViewport)}
         onClick={() => setOpen((value) => !value)}
         data-ribbon-overflow=""
         className={buttonClass(
@@ -560,6 +561,7 @@ function RibbonOverflow({
             <OverflowRow
               key={item.id}
               item={item}
+              isCompactViewport={isCompactViewport}
               onDragStart={() => setOpen(false)}
               onActivate={(openInSplit) => {
                 setOpen(false);
@@ -567,7 +569,7 @@ function RibbonOverflow({
               }}
             />
           ))}
-          <div className="my-1 h-px bg-border" />
+          {items.length > 0 ? <div role="separator" className="my-1 h-px bg-border" /> : null}
           <MenuButton
             onClick={() => {
               setOpen(false);
@@ -584,10 +586,12 @@ function RibbonOverflow({
 
 function OverflowRow({
   item,
+  isCompactViewport,
   onActivate,
   onDragStart,
 }: {
   item: ExperimentalSidebarNavigationItem;
+  isCompactViewport: boolean;
   onActivate: (openInSplit: boolean) => void;
   onDragStart: () => void;
 }) {
@@ -603,6 +607,7 @@ function OverflowRow({
       disabled={item.isDisabled}
       aria-busy={item.isLoading || undefined}
       {...splitProps}
+      onPointerDown={composeRibbonPointerDown(isCompactViewport, splitProps.onPointerDown)}
       onClick={(event) => onActivate(event.metaKey || event.ctrlKey)}
       className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
     >
@@ -668,6 +673,17 @@ function buttonClass(
 
 function glyphClass(isCompactViewport: boolean) {
   return isCompactViewport ? "size-5" : "size-4";
+}
+
+function composeRibbonPointerDown(
+  isCompactViewport: boolean,
+  onPointerDown?: (event: ReactPointerEvent<HTMLElement>) => void,
+) {
+  return (event: ReactPointerEvent<HTMLButtonElement>) => {
+    onPointerDown?.(event);
+    if (ribbonTapKind({ isCompactViewport, isPrimary: event.isPrimary }) === null) return;
+    postRibbonTap(readHapticBridge(window));
+  };
 }
 
 function itemLabel(item: ExperimentalSidebarNavigationItem, showShortcut: boolean) {
