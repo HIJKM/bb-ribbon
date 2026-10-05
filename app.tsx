@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import {
   definePluginApp,
@@ -12,9 +12,27 @@ import {
 import { fitVisibleCount, readCssPx } from "./ribbon-fit";
 import { postRibbonTap, readHapticBridge, ribbonTapKind } from "./ribbon-haptic";
 
+const POINTER_COARSE_QUERY = "(pointer: coarse)";
+
+function usePointerCoarse(): boolean {
+  return useSyncExternalStore(subscribePointerCoarse, readPointerCoarse, () => false);
+}
+
+function subscribePointerCoarse(onStoreChange: () => void) {
+  const media = window.matchMedia(POINTER_COARSE_QUERY);
+  media.addEventListener("change", onStoreChange);
+  return () => media.removeEventListener("change", onStoreChange);
+}
+
+function readPointerCoarse() {
+  return window.matchMedia(POINTER_COARSE_QUERY).matches;
+}
+
 function RibbonNavigation({ isCompactViewport }: ExperimentalSidebarNavigationProps) {
   const { actions, activeItemId, isShortcutModifierHeld, items } =
     experimental_useSidebarNavigation();
+  const pointerCoarse = usePointerCoarse();
+  const coarseCompact = isCompactViewport && pointerCoarse;
   const railRef = useRef<HTMLDivElement>(null);
   useRibbonPlacement(railRef, items.length > 0, isCompactViewport);
   const visible = items.filter((item) => item.isVisible);
@@ -24,6 +42,7 @@ function RibbonNavigation({ isCompactViewport }: ExperimentalSidebarNavigationPr
     visible.length,
     true,
     isCompactViewport ? "x" : "y",
+    coarseCompact,
   );
   const shown = visible.slice(0, fitted);
   const overflow = [...visible.slice(fitted), ...hidden];
@@ -49,6 +68,7 @@ function RibbonNavigation({ isCompactViewport }: ExperimentalSidebarNavigationPr
           item={item}
           isActive={item.id === activeItemId && item.action.kind !== "new-thread"}
           isCompactViewport={isCompactViewport}
+          coarseCompact={coarseCompact}
           showShortcut={isShortcutModifierHeld}
           onActivate={(openInSplit) => actions.activate(item.id, { openInSplit })}
           onCustomize={() => actions.openCustomize()}
@@ -57,6 +77,7 @@ function RibbonNavigation({ isCompactViewport }: ExperimentalSidebarNavigationPr
       <RibbonOverflow
         items={overflow}
         isCompactViewport={isCompactViewport}
+        coarseCompact={coarseCompact}
         openBelow={isCompactViewport}
         onActivate={(itemId, openInSplit) => {
           actions.activate(itemId, { openInSplit });
@@ -234,6 +255,7 @@ function useFittedCount(
   itemCount: number,
   reserveOverflow: boolean,
   axis: "x" | "y",
+  coarseCompact: boolean,
 ) {
   const [count, setCount] = useState(itemCount);
 
@@ -242,7 +264,7 @@ function useFittedCount(
     if (!rail) return;
 
     const measure = () => {
-      const next = readFittedCount(rail, itemCount, reserveOverflow, axis);
+      const next = readFittedCount(rail, itemCount, reserveOverflow, axis, coarseCompact);
       if (next === null) return;
       setCount((current) => (current === next ? current : next));
     };
@@ -254,7 +276,7 @@ function useFittedCount(
     const panel = host?.closest<HTMLElement>("[data-sidebar='panel']");
     if (panel) observer.observe(panel);
     return () => observer.disconnect();
-  }, [axis, itemCount, railRef, reserveOverflow]);
+  }, [axis, coarseCompact, itemCount, railRef, reserveOverflow]);
 
   return Math.min(count, itemCount);
 }
@@ -264,6 +286,7 @@ function readFittedCount(
   itemCount: number,
   reserveOverflow: boolean,
   axis: "x" | "y",
+  coarseCompact: boolean,
 ): number | null {
   const style = getComputedStyle(rail);
   const available = axis === "x" ? rail.clientWidth : rail.clientHeight;
@@ -280,13 +303,13 @@ function readFittedCount(
     available,
     padding,
     gap,
-    itemSize: axis === "x" ? compactSlotMinPx() : desktopSlotMinPx(),
+    itemSize: coarseCompact ? compactSlotMinPx() : desktopSlotMinPx(),
     itemCount,
     reserveOverflow,
   });
 }
 
-/** `size-9` is 2.25rem. The laid-out width is larger once slots share the row, so measuring it would drop a slot on the next pass. */
+/** `size-9` is 2.25rem. Used only when the compact row is also a coarse pointer. The laid-out width is larger once slots share the row, so measuring it would drop a slot on the next pass. */
 function compactSlotMinPx(): number {
   return rootRemPx(2.25, 36);
 }
@@ -382,6 +405,7 @@ function RibbonButton({
   item,
   isActive,
   isCompactViewport,
+  coarseCompact,
   showShortcut,
   onActivate,
   onCustomize,
@@ -389,6 +413,7 @@ function RibbonButton({
   item: ExperimentalSidebarNavigationItem;
   isActive: boolean;
   isCompactViewport: boolean;
+  coarseCompact: boolean;
   showShortcut: boolean;
   onActivate: (openInSplit: boolean) => void;
   onCustomize: () => void;
@@ -457,9 +482,9 @@ function RibbonButton({
         }}
         onBlur={() => setHover(false)}
         data-ribbon-item=""
-        className={buttonClass(isActive, item.isLoading, isCompactViewport)}
+        className={buttonClass(isActive, item.isLoading, coarseCompact)}
       >
-        <NavigationIcon icon={item.icon} className={glyphClass(isCompactViewport)} />
+        <NavigationIcon icon={item.icon} className={glyphClass(coarseCompact)} />
       </button>
       {showTip && buttonRef.current
         ? createPortal(
@@ -495,12 +520,14 @@ function RibbonButton({
 function RibbonOverflow({
   items,
   isCompactViewport,
+  coarseCompact,
   openBelow,
   onActivate,
   onCustomize,
 }: {
   items: readonly ExperimentalSidebarNavigationItem[];
   isCompactViewport: boolean;
+  coarseCompact: boolean;
   openBelow: boolean;
   onActivate: (itemId: string, openInSplit: boolean) => void;
   onCustomize: () => void;
@@ -527,7 +554,7 @@ function RibbonOverflow({
   return (
     <div
       ref={rootRef}
-      className={isCompactViewport ? "relative h-9 min-w-9 flex-1" : "relative shrink-0"}
+      className={coarseCompact ? "relative h-9 min-w-9 flex-1" : "relative shrink-0"}
     >
       <button
         type="button"
@@ -540,13 +567,13 @@ function RibbonOverflow({
         className={buttonClass(
           open,
           false,
-          isCompactViewport,
-          isCompactViewport ? "h-full w-full" : undefined,
+          coarseCompact,
+          coarseCompact ? "h-full w-full" : undefined,
         )}
       >
         <Icon
           name="MoreHorizontal"
-          className={glyphClass(isCompactViewport)}
+          className={glyphClass(coarseCompact)}
           aria-hidden="true"
         />
       </button>
@@ -660,10 +687,10 @@ function menuStyle(root: HTMLDivElement | null, openBelow: boolean): CSSProperti
 function buttonClass(
   isActive: boolean,
   isLoading: boolean,
-  isCompactViewport: boolean,
+  coarseCompact: boolean,
   box?: string,
 ) {
-  const size = box ?? (isCompactViewport ? "h-9 min-w-9 flex-1" : "size-7 shrink-0 grow-0");
+  const size = box ?? (coarseCompact ? "h-9 min-w-9 flex-1" : "size-7 shrink-0 grow-0");
   const tone = isActive
     ? "bg-sidebar-accent text-sidebar-foreground"
     : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground";
@@ -671,8 +698,8 @@ function buttonClass(
   return `grid ${size} place-items-center rounded ${tone} ${loading}`;
 }
 
-function glyphClass(isCompactViewport: boolean) {
-  return isCompactViewport ? "size-5" : "size-4";
+function glyphClass(coarseCompact: boolean) {
+  return coarseCompact ? "size-5" : "size-4";
 }
 
 function composeRibbonPointerDown(
