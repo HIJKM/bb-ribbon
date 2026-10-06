@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import {
   definePluginApp,
@@ -11,38 +11,23 @@ import {
 } from "@get-bb/plugin-sdk/app";
 import { fitVisibleCount, readCssPx } from "./ribbon-fit";
 import { postRibbonTap, readHapticBridge, ribbonTapKind } from "./ribbon-haptic";
+import { useDeviceChrome } from "./use-device.ts";
 
-const POINTER_COARSE_QUERY = "(pointer: coarse)";
-
-function usePointerCoarse(): boolean {
-  return useSyncExternalStore(subscribePointerCoarse, readPointerCoarse, () => false);
-}
-
-function subscribePointerCoarse(onStoreChange: () => void) {
-  const media = window.matchMedia(POINTER_COARSE_QUERY);
-  media.addEventListener("change", onStoreChange);
-  return () => media.removeEventListener("change", onStoreChange);
-}
-
-function readPointerCoarse() {
-  return window.matchMedia(POINTER_COARSE_QUERY).matches;
-}
-
-function RibbonNavigation({ isCompactViewport }: ExperimentalSidebarNavigationProps) {
+function RibbonNavigation(_props: ExperimentalSidebarNavigationProps) {
   const { actions, activeItemId, isShortcutModifierHeld, items } =
     experimental_useSidebarNavigation();
-  const pointerCoarse = usePointerCoarse();
-  const coarseCompact = isCompactViewport && pointerCoarse;
+  const { device } = useDeviceChrome();
+  const phone = device === "phone";
   const railRef = useRef<HTMLDivElement>(null);
-  useRibbonPlacement(railRef, items.length > 0, isCompactViewport);
+  useRibbonPlacement(railRef, items.length > 0, phone);
   const visible = items.filter((item) => item.isVisible);
   const hidden = items.filter((item) => !item.isVisible);
   const fitted = useFittedCount(
     railRef,
     visible.length,
     true,
-    isCompactViewport ? "x" : "y",
-    coarseCompact,
+    phone ? "x" : "y",
+    phone,
   );
   const shown = visible.slice(0, fitted);
   const overflow = [...visible.slice(fitted), ...hidden];
@@ -55,9 +40,9 @@ function RibbonNavigation({ isCompactViewport }: ExperimentalSidebarNavigationPr
       data-bb-sidebar-ribbon=""
       role="toolbar"
       aria-label="Sidebar"
-      data-ribbon-axis={isCompactViewport ? "x" : "y"}
+      data-ribbon-axis={phone ? "x" : "y"}
       className={
-        isCompactViewport
+        phone
           ? "flex h-auto w-full min-w-0 flex-row items-center gap-0 overflow-hidden bg-sidebar py-1 pl-[12px] pr-2"
           : "flex min-h-0 w-full flex-col items-center gap-0.5 self-stretch overflow-hidden border-r border-sidebar-border/25 bg-sidebar py-1"
       }
@@ -67,8 +52,7 @@ function RibbonNavigation({ isCompactViewport }: ExperimentalSidebarNavigationPr
           key={item.id}
           item={item}
           isActive={item.id === activeItemId && item.action.kind !== "new-thread"}
-          isCompactViewport={isCompactViewport}
-          coarseCompact={coarseCompact}
+          phone={phone}
           showShortcut={isShortcutModifierHeld}
           onActivate={(openInSplit) => actions.activate(item.id, { openInSplit })}
           onCustomize={() => actions.openCustomize()}
@@ -76,9 +60,8 @@ function RibbonNavigation({ isCompactViewport }: ExperimentalSidebarNavigationPr
       ))}
       <RibbonOverflow
         items={overflow}
-        isCompactViewport={isCompactViewport}
-        coarseCompact={coarseCompact}
-        openBelow={isCompactViewport}
+        phone={phone}
+        openBelow={phone}
         onActivate={(itemId, openInSplit) => {
           actions.activate(itemId, { openInSplit });
         }}
@@ -105,7 +88,7 @@ const STYLE_PROPS = [
 function useRibbonPlacement(
   railRef: RefObject<HTMLDivElement | null>,
   active: boolean,
-  isCompactViewport: boolean,
+  phone: boolean,
 ) {
   const homeRef = useRef<{ parent: Node; next: ChildNode | null } | null>(null);
   const originalsRef = useRef(new Map<HTMLElement, Map<string, string>>());
@@ -134,7 +117,7 @@ function useRibbonPlacement(
     if (!rail) return;
 
     const apply = () => {
-      if (isCompactViewport) {
+      if (phone) {
         restorePlacement(rail, homeRef.current, originalsRef.current);
         const nav = rail.closest<HTMLElement>('[data-testid="sidebar-navigation-region"]');
         if (nav) {
@@ -208,7 +191,7 @@ function useRibbonPlacement(
     };
 
     apply();
-    if (isCompactViewport) return;
+    if (phone) return;
     const shell = rail.closest('[data-sidebar="sidebar"]');
     const observer = new MutationObserver(apply);
     if (shell) {
@@ -255,7 +238,7 @@ function useFittedCount(
   itemCount: number,
   reserveOverflow: boolean,
   axis: "x" | "y",
-  coarseCompact: boolean,
+  phone: boolean,
 ) {
   const [count, setCount] = useState(itemCount);
 
@@ -264,7 +247,7 @@ function useFittedCount(
     if (!rail) return;
 
     const measure = () => {
-      const next = readFittedCount(rail, itemCount, reserveOverflow, axis, coarseCompact);
+      const next = readFittedCount(rail, itemCount, reserveOverflow, axis, phone);
       if (next === null) return;
       setCount((current) => (current === next ? current : next));
     };
@@ -276,7 +259,7 @@ function useFittedCount(
     const panel = host?.closest<HTMLElement>("[data-sidebar='panel']");
     if (panel) observer.observe(panel);
     return () => observer.disconnect();
-  }, [axis, coarseCompact, itemCount, railRef, reserveOverflow]);
+  }, [axis, phone, itemCount, railRef, reserveOverflow]);
 
   return Math.min(count, itemCount);
 }
@@ -286,7 +269,7 @@ function readFittedCount(
   itemCount: number,
   reserveOverflow: boolean,
   axis: "x" | "y",
-  coarseCompact: boolean,
+  phone: boolean,
 ): number | null {
   const style = getComputedStyle(rail);
   const available = axis === "x" ? rail.clientWidth : rail.clientHeight;
@@ -303,13 +286,13 @@ function readFittedCount(
     available,
     padding,
     gap,
-    itemSize: coarseCompact ? compactSlotMinPx() : desktopSlotMinPx(),
+    itemSize: phone ? compactSlotMinPx() : desktopSlotMinPx(),
     itemCount,
     reserveOverflow,
   });
 }
 
-/** `size-9` is 2.25rem. Used only when the compact row is also a coarse pointer. The laid-out width is larger once slots share the row, so measuring it would drop a slot on the next pass. */
+/** `size-9` is 2.25rem. Phone rows share the width, so measuring a laid-out slot would drop one on the next pass. */
 function compactSlotMinPx(): number {
   return rootRemPx(2.25, 36);
 }
@@ -404,16 +387,14 @@ function RibbonNamePopover({
 function RibbonButton({
   item,
   isActive,
-  isCompactViewport,
-  coarseCompact,
+  phone,
   showShortcut,
   onActivate,
   onCustomize,
 }: {
   item: ExperimentalSidebarNavigationItem;
   isActive: boolean;
-  isCompactViewport: boolean;
-  coarseCompact: boolean;
+  phone: boolean;
   showShortcut: boolean;
   onActivate: (openInSplit: boolean) => void;
   onCustomize: () => void;
@@ -424,7 +405,7 @@ function RibbonButton({
   const tipId = useId();
   const [hover, setHover] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ left: number; top: number } | null>(null);
-  const showTip = hover && !isCompactViewport && buttonRef.current !== null;
+  const showTip = hover && !phone && buttonRef.current !== null;
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -462,7 +443,7 @@ function RibbonButton({
       <button
         ref={buttonRef}
         type="button"
-        title={isCompactViewport ? label : undefined}
+        title={phone ? label : undefined}
         aria-label={label}
         aria-describedby={showTip ? tipId : undefined}
         aria-current={isActive ? "page" : undefined}
@@ -470,21 +451,21 @@ function RibbonButton({
         aria-keyshortcuts={item.shortcut?.ariaKeyShortcuts}
         disabled={item.isDisabled}
         {...splitProps}
-        onPointerDown={composeRibbonPointerDown(isCompactViewport, splitProps.onPointerDown)}
+        onPointerDown={composeRibbonPointerDown(phone, splitProps.onPointerDown)}
         onClick={(event) => onActivate(event.metaKey || event.ctrlKey)}
         onContextMenu={openContextMenu}
         onMouseEnter={() => {
-          if (!isCompactViewport) setHover(true);
+          if (!phone) setHover(true);
         }}
         onMouseLeave={() => setHover(false)}
         onFocus={() => {
-          if (!isCompactViewport) setHover(true);
+          if (!phone) setHover(true);
         }}
         onBlur={() => setHover(false)}
         data-ribbon-item=""
-        className={buttonClass(isActive, item.isLoading, coarseCompact)}
+        className={buttonClass(isActive, item.isLoading, phone)}
       >
-        <NavigationIcon icon={item.icon} className={glyphClass(coarseCompact)} />
+        <NavigationIcon icon={item.icon} className={glyphClass(phone)} />
       </button>
       {showTip && buttonRef.current
         ? createPortal(
@@ -519,15 +500,13 @@ function RibbonButton({
 
 function RibbonOverflow({
   items,
-  isCompactViewport,
-  coarseCompact,
+  phone,
   openBelow,
   onActivate,
   onCustomize,
 }: {
   items: readonly ExperimentalSidebarNavigationItem[];
-  isCompactViewport: boolean;
-  coarseCompact: boolean;
+  phone: boolean;
   openBelow: boolean;
   onActivate: (itemId: string, openInSplit: boolean) => void;
   onCustomize: () => void;
@@ -554,26 +533,26 @@ function RibbonOverflow({
   return (
     <div
       ref={rootRef}
-      className={coarseCompact ? "relative h-9 min-w-9 flex-1" : "relative shrink-0"}
+      className={phone ? "relative h-9 min-w-9 flex-1" : "relative shrink-0"}
     >
       <button
         type="button"
         aria-label="More sidebar navigation"
         aria-expanded={open}
         title="More"
-        onPointerDown={composeRibbonPointerDown(isCompactViewport)}
+        onPointerDown={composeRibbonPointerDown(phone)}
         onClick={() => setOpen((value) => !value)}
         data-ribbon-overflow=""
         className={buttonClass(
           open,
           false,
-          coarseCompact,
-          coarseCompact ? "h-full w-full" : undefined,
+          phone,
+          phone ? "h-full w-full" : undefined,
         )}
       >
         <Icon
           name="MoreHorizontal"
-          className={glyphClass(coarseCompact)}
+          className={glyphClass(phone)}
           aria-hidden="true"
         />
       </button>
@@ -588,7 +567,7 @@ function RibbonOverflow({
             <OverflowRow
               key={item.id}
               item={item}
-              isCompactViewport={isCompactViewport}
+              phone={phone}
               onDragStart={() => setOpen(false)}
               onActivate={(openInSplit) => {
                 setOpen(false);
@@ -613,12 +592,12 @@ function RibbonOverflow({
 
 function OverflowRow({
   item,
-  isCompactViewport,
+  phone,
   onActivate,
   onDragStart,
 }: {
   item: ExperimentalSidebarNavigationItem;
-  isCompactViewport: boolean;
+  phone: boolean;
   onActivate: (openInSplit: boolean) => void;
   onDragStart: () => void;
 }) {
@@ -634,7 +613,7 @@ function OverflowRow({
       disabled={item.isDisabled}
       aria-busy={item.isLoading || undefined}
       {...splitProps}
-      onPointerDown={composeRibbonPointerDown(isCompactViewport, splitProps.onPointerDown)}
+      onPointerDown={composeRibbonPointerDown(phone, splitProps.onPointerDown)}
       onClick={(event) => onActivate(event.metaKey || event.ctrlKey)}
       className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
     >
@@ -687,10 +666,10 @@ function menuStyle(root: HTMLDivElement | null, openBelow: boolean): CSSProperti
 function buttonClass(
   isActive: boolean,
   isLoading: boolean,
-  coarseCompact: boolean,
+  phone: boolean,
   box?: string,
 ) {
-  const size = box ?? (coarseCompact ? "h-9 min-w-9 flex-1" : "size-7 shrink-0 grow-0");
+  const size = box ?? (phone ? "h-9 min-w-9 flex-1" : "size-7 shrink-0 grow-0");
   const tone = isActive
     ? "bg-sidebar-accent text-sidebar-foreground"
     : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground";
@@ -698,17 +677,17 @@ function buttonClass(
   return `grid ${size} place-items-center rounded ${tone} ${loading}`;
 }
 
-function glyphClass(coarseCompact: boolean) {
-  return coarseCompact ? "size-5" : "size-4";
+function glyphClass(phone: boolean) {
+  return phone ? "size-5" : "size-4";
 }
 
 function composeRibbonPointerDown(
-  isCompactViewport: boolean,
+  phone: boolean,
   onPointerDown?: (event: ReactPointerEvent<HTMLElement>) => void,
 ) {
   return (event: ReactPointerEvent<HTMLButtonElement>) => {
     onPointerDown?.(event);
-    if (ribbonTapKind({ isCompactViewport, isPrimary: event.isPrimary }) === null) return;
+    if (ribbonTapKind({ phone, isPrimary: event.isPrimary }) === null) return;
     postRibbonTap(readHapticBridge(window));
   };
 }

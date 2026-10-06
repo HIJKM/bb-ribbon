@@ -4,12 +4,12 @@ import { postRibbonTap, readHapticBridge, ribbonTapKind } from "./ribbon-haptic.
 
 describe("ribbonTapKind", () => {
   it("uses the sidebar-open impact for a primary press on the mobile ribbon", () => {
-    assert.equal(ribbonTapKind({ isCompactViewport: true, isPrimary: true }), "impact-light");
+    assert.equal(ribbonTapKind({ phone: true, isPrimary: true }), "impact-light");
   });
 
   it("stays quiet on the desktop rail and on a secondary pointer", () => {
-    assert.equal(ribbonTapKind({ isCompactViewport: false, isPrimary: true }), null);
-    assert.equal(ribbonTapKind({ isCompactViewport: true, isPrimary: false }), null);
+    assert.equal(ribbonTapKind({ phone: false, isPrimary: true }), null);
+    assert.equal(ribbonTapKind({ phone: true, isPrimary: false }), null);
   });
 });
 

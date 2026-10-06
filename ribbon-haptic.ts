@@ -7,10 +7,10 @@ export interface HapticBridge {
 
 /** Same light impact the sidebar uses when it opens. Desktop and extra fingers stay quiet. */
 export function ribbonTapKind(input: {
-  isCompactViewport: boolean;
+  phone: boolean;
   isPrimary: boolean;
 }): RibbonTapKind | null {
-  if (!input.isCompactViewport || !input.isPrimary) return null;
+  if (!input.phone || !input.isPrimary) return null;
   return "impact-light";
 }
 
