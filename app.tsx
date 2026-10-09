@@ -72,7 +72,7 @@ function RibbonNavigation(_props: ExperimentalSidebarNavigationProps) {
       className={
         phone
           ? "flex h-auto w-full min-w-0 flex-row items-center gap-0 overflow-hidden bg-sidebar py-1 pl-[12px] pr-2"
-          : "flex min-h-0 flex-col items-center gap-0.5 self-stretch overflow-hidden border-r border-sidebar-border/25 bg-sidebar py-1 transition-[width] duration-200 ease-out motion-reduce:transition-none"
+          : "flex min-h-0 flex-col items-center gap-0.5 self-stretch overflow-hidden border-r border-sidebar-border bg-sidebar py-1 transition-[width] duration-200 ease-out motion-reduce:transition-none"
       }
     >
       {shown.map((item) => (
