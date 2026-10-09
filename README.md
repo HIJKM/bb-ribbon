@@ -45,12 +45,8 @@ Plugin id: `bb-ribbon`.
 
 Enable it in **Settings → Appearance → Navigation** (value `bb-ribbon/ribbon`).
 
-Choose the desktop hover behavior in **Settings → Ribbon → 데스크톱 리본 hover 동작**:
-
-- **스레드 목록 위에 겹치기** (default) — the expanded ribbon temporarily covers the thread list.
-- **사이드바 너비 늘리기** — the sidebar grows with the ribbon, keeping the thread list width unchanged.
-
-The ribbon collapses when the pointer and keyboard focus leave it. Phone navigation keeps its horizontal layout.
+Toggle desktop hover expansion in **Settings → Ribbon → 데스크톱 리본 hover 확장** (enabled by default).
+The ribbon expands over the thread list and fades labels in; it collapses when the pointer and keyboard focus leave. Icons stay in place throughout the transition. Phone navigation keeps its horizontal layout.
 
 ## what it does
 

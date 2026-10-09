@@ -19,7 +19,7 @@ let app: Awaited<ReturnType<typeof loadPluginApp>>;
 before(async () => { app = await loadPluginApp(() => import('./app.tsx')); });
 afterEach(() => { cleanup(); phone = false; });
 
-function mount(mode: string) {
+function mount(expandOnHover = true) {
   const registration = app.experimentalSidebarNavigations[0]!;
   const Ribbon = registration.component;
   const slot = renderSlot({ ...registration, component: (props: ExperimentalSidebarNavigationProps) => (
@@ -36,7 +36,7 @@ function mount(mode: string) {
     </div>
   ) }, { isCompactViewport: false, experimental_Original: () => null }, {
     pluginId: "bb-ribbon",
-    settings: { desktopHoverMode: mode },
+    settings: { expandOnHover },
     sidebarNavigation: { items: [{ id: 'tasks', label: 'Tasks', icon: { kind: 'host', name: 'search' }, action: { kind: 'search-threads' }, isVisible: true, isDisabled: false, isLoading: false, pluginId: null, shortcut: null, experimental_Accessory: null }] satisfies ExperimentalSidebarNavigationItem[] },
   });
   const rail = document.querySelector<HTMLElement>('[data-bb-sidebar-ribbon]')!;
@@ -48,7 +48,7 @@ function mount(mode: string) {
 
 describe('desktop ribbon hover', () => {
   it('reveals labels over threads, keeps sidebar width, and collapses on leave', () => {
-    const { rail, shell, host } = mount('스레드 목록 위에 겹치기');
+    const { rail, shell, host } = mount();
     assert.equal(rail.getAttribute('data-bb-plugin'), 'bb-ribbon');
     fireEvent.mouseEnter(rail);
     assert.equal(rail.dataset.ribbonExpanded, 'true');
@@ -61,21 +61,41 @@ describe('desktop ribbon hover', () => {
     assert.equal(rail.dataset.ribbonExpanded, 'false');
   });
 
-  it('adds the same delta to the sidebar and grid so the thread width is preserved', () => {
-    const { rail, panel, host, slot } = mount('사이드바 너비 늘리기');
+  it('keeps desktop row geometry, labels, and stacking stable throughout hover', () => {
+    const { rail } = mount();
+    const item = rail.querySelector('button')!;
+    const label = item.querySelector<HTMLElement>('[data-ribbon-label]')!;
+    const more = rail.querySelector<HTMLElement>('[data-ribbon-overflow]')!;
+    const itemClass = item.className;
+    const moreClass = more.className;
+    assert.ok(label, 'labels remain mounted while collapsed');
+    assert.equal(label.style.opacity, '0');
+    assert.equal(rail.style.zIndex, '30');
     fireEvent.mouseEnter(rail);
-    assert.equal(host.style.gridTemplateColumns, '12rem minmax(0, 1fr)');
-    assert.equal(panel.style.getPropertyValue('--sidebar-width'), 'calc(320px + 9.5rem)');
+    assert.equal(item.querySelector('[data-ribbon-label]'), label);
+    assert.equal(item.className, itemClass);
+    assert.equal(more.className, moreClass);
+    assert.equal(label.style.opacity, '1');
     fireEvent.mouseLeave(rail);
+    assert.equal(item.querySelector('[data-ribbon-label]'), label);
+    assert.equal(item.className, itemClass);
+    assert.equal(more.className, moreClass);
+    assert.equal(label.style.opacity, '0');
+    assert.equal(rail.style.zIndex, '30', 'closing rail stays above threads until it shrinks');
+  });
+
+  it('keeps the icon rail collapsed when hover expansion is disabled', () => {
+    const { rail, panel, host } = mount(false);
+    fireEvent.mouseEnter(rail);
+    assert.equal(rail.dataset.ribbonExpanded, 'false');
+    assert.equal(rail.style.width, '2.5rem');
     assert.equal(panel.style.getPropertyValue('--sidebar-width'), '320px');
     assert.equal(host.style.gridTemplateColumns, '2.5rem minmax(0, 1fr)');
-    fireEvent.mouseEnter(rail);
-    slot.lifecycle.unmount();
-    assert.equal(panel.style.getPropertyValue('--sidebar-width'), '320px');
+    assert.equal(rail.querySelector('button')!.title, 'Tasks');
   });
 
   it('stays expanded during keyboard navigation and closes when focus leaves', () => {
-    const { rail } = mount('스레드 목록 위에 겹치기');
+    const { rail } = mount();
     const item = rail.querySelector('button')!;
     // jsdom does not implement the browser's keyboard focus-visible heuristic.
     const matches = item.matches.bind(item);
@@ -89,7 +109,7 @@ describe('desktop ribbon hover', () => {
   });
 
   it('collapses after pointer activation even while the button retains focus', () => {
-    const { rail } = mount('스레드 목록 위에 겹치기');
+    const { rail } = mount();
     const item = rail.querySelector('button')!;
     fireEvent.mouseEnter(rail);
     act(() => item.focus());
@@ -101,7 +121,7 @@ describe('desktop ribbon hover', () => {
 
   it('does not expand on a phone', () => {
     phone = true;
-    const { rail, shell } = mount('사이드바 너비 늘리기');
+    const { rail, shell } = mount();
     fireEvent.mouseEnter(rail);
     assert.equal(rail.dataset.ribbonExpanded, 'false');
     assert.equal(rail.dataset.ribbonAxis, 'x');

@@ -14,7 +14,6 @@ import {
 import { fitVisibleCount, readCssPx } from "./ribbon-fit";
 import { postRibbonTap, readHapticBridge, ribbonTapKind } from "./ribbon-haptic";
 import { useDeviceChrome } from "./use-device.ts";
-import { expandSidebarWidth, PUSH_MODE } from "./ribbon-expansion";
 
 function RibbonNavigation(_props: ExperimentalSidebarNavigationProps) {
   const { actions, activeItemId, isShortcutModifierHeld, items } =
@@ -24,15 +23,15 @@ function RibbonNavigation(_props: ExperimentalSidebarNavigationProps) {
   const phone = device === "phone";
   const railRef = useRef<HTMLDivElement>(null);
   const { values } = useSettings();
-  const push = values?.desktopHoverMode === PUSH_MODE;
+  const expandOnHover = values?.expandOnHover !== false;
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  const expanded = !phone && (hovered || focused);
+  const expanded = expandOnHover && !phone && (hovered || focused);
   useEffect(() => {
     setHovered(false);
     setFocused(false);
   }, [phone]);
-  useRibbonPlacement(railRef, items.length > 0, phone, expanded, push);
+  useRibbonPlacement(railRef, items.length > 0, phone);
   const visible = items.filter((item) => item.isVisible);
   const hidden = items.filter((item) => !item.isVisible);
   const fitted = useFittedCount(
@@ -68,12 +67,12 @@ function RibbonNavigation(_props: ExperimentalSidebarNavigationProps) {
       style={phone ? undefined : {
         width: expanded ? EXPANDED_RAIL_COLUMN : RAIL_COLUMN,
         position: "relative",
-        zIndex: expanded ? 30 : undefined,
+        zIndex: 30,
       }}
       className={
         phone
           ? "flex h-auto w-full min-w-0 flex-row items-center gap-0 overflow-hidden bg-sidebar py-1 pl-[12px] pr-2"
-          : "flex min-h-0 flex-col items-center gap-0.5 self-stretch overflow-hidden border-r border-sidebar-border/25 bg-sidebar py-1 transition-[width] duration-150 ease-out motion-reduce:transition-none"
+          : "flex min-h-0 flex-col items-center gap-0.5 self-stretch overflow-hidden border-r border-sidebar-border/25 bg-sidebar py-1 transition-[width] duration-200 ease-out motion-reduce:transition-none"
       }
     >
       {shown.map((item) => (
@@ -83,6 +82,7 @@ function RibbonNavigation(_props: ExperimentalSidebarNavigationProps) {
           isActive={item.id === activeItemId && item.action.kind !== "new-thread"}
           phone={phone}
           expanded={expanded}
+          expandOnHover={expandOnHover}
           showShortcut={isShortcutModifierHeld}
           onActivate={(openInSplit) => actions.activate(item.id, { openInSplit })}
           onCustomize={() => actions.openCustomize()}
@@ -104,7 +104,6 @@ function RibbonNavigation(_props: ExperimentalSidebarNavigationProps) {
 
 const RAIL_COLUMN = "2.5rem";
 const EXPANDED_RAIL_COLUMN = "12rem";
-const RAIL_EXPANSION = "9.5rem";
 const STYLE_PROPS = [
   "display",
   "grid-template-columns",
@@ -122,8 +121,6 @@ function useRibbonPlacement(
   railRef: RefObject<HTMLDivElement | null>,
   active: boolean,
   phone: boolean,
-  expanded: boolean,
-  push: boolean,
 ) {
   const homeRef = useRef<{ parent: Node; next: ChildNode | null } | null>(null);
   const originalsRef = useRef(new Map<HTMLElement, Map<string, string>>());
@@ -191,7 +188,7 @@ function useRibbonPlacement(
 
       rememberStyle(originalsRef.current, host);
       host.style.display = "grid";
-      host.style.gridTemplateColumns = `${expanded && push ? EXPANDED_RAIL_COLUMN : RAIL_COLUMN} minmax(0, 1fr)`;
+      host.style.gridTemplateColumns = `${RAIL_COLUMN} minmax(0, 1fr)`;
       host.style.gridTemplateRows = "auto auto minmax(0, 1fr) auto";
       host.style.flexDirection = "";
       host.style.paddingLeft = "";
@@ -239,14 +236,6 @@ function useRibbonPlacement(
     }
     return () => observer.disconnect();
   });
-
-  useLayoutEffect(() => {
-    if (!active || phone || !expanded || !push) return;
-    const host = railRef.current && findRailHost(railRef.current);
-    const shell = host?.closest<HTMLElement>('[data-side="left"]');
-    if (!shell?.parentElement) return;
-    return expandSidebarWidth(shell, RAIL_EXPANSION);
-  }, [active, phone, expanded, push, railRef]);
 }
 
 function restorePlacement(
@@ -382,6 +371,7 @@ function RibbonButton({
   isActive,
   phone,
   expanded,
+  expandOnHover,
   showShortcut,
   onActivate,
   onCustomize,
@@ -390,6 +380,7 @@ function RibbonButton({
   isActive: boolean;
   phone: boolean;
   expanded: boolean;
+  expandOnHover: boolean;
   showShortcut: boolean;
   onActivate: (openInSplit: boolean) => void;
   onCustomize: () => void;
@@ -436,7 +427,7 @@ function RibbonButton({
       <button
         ref={buttonRef}
         type="button"
-        title={phone ? label : undefined}
+        title={phone || !expandOnHover ? label : undefined}
         aria-label={label}
         aria-current={isActive ? "page" : undefined}
         aria-busy={item.isLoading || undefined}
@@ -447,10 +438,20 @@ function RibbonButton({
         onClick={(event) => onActivate(event.metaKey || event.ctrlKey)}
         onContextMenu={openContextMenu}
         data-ribbon-item=""
-        className={buttonClass(isActive, item.isLoading, phone, undefined, expanded)}
+        className={buttonClass(isActive, item.isLoading, phone)}
       >
         <NavigationIcon icon={item.icon} className={glyphClass(phone)} />
-        {expanded ? <span data-ribbon-label="" className="min-w-0 justify-self-stretch truncate text-left text-xs" title={label}>{label}</span> : null}
+        {!phone ? (
+          <span
+            data-ribbon-label=""
+            aria-hidden={!expanded}
+            style={{ opacity: expanded ? 1 : 0 }}
+            className="min-w-0 justify-self-stretch truncate text-left text-xs transition-opacity duration-150 ease-out motion-reduce:transition-none"
+            title={expanded ? label : undefined}
+          >
+            {label}
+          </span>
+        ) : null}
       </button>
       {contextMenu
         ? createPortal(
@@ -514,7 +515,7 @@ function RibbonOverflow({
   return (
     <div
       ref={rootRef}
-      className={phone ? "relative h-9 min-w-9 flex-1" : expanded ? "relative w-full shrink-0" : "relative shrink-0"}
+      className={phone ? "relative h-9 min-w-9 flex-1" : "relative w-full shrink-0"}
     >
       <button
         type="button"
@@ -529,7 +530,6 @@ function RibbonOverflow({
           false,
           phone,
           phone ? "h-full w-full" : undefined,
-          expanded,
         )}
       >
         <Icon
@@ -537,7 +537,16 @@ function RibbonOverflow({
           className={glyphClass(phone)}
           aria-hidden="true"
         />
-        {expanded ? <span className="min-w-0 justify-self-stretch truncate text-left text-xs">More</span> : null}
+        {!phone ? (
+          <span
+            data-ribbon-label=""
+            aria-hidden={!expanded}
+            style={{ opacity: expanded ? 1 : 0 }}
+            className="min-w-0 justify-self-stretch truncate text-left text-xs transition-opacity duration-150 ease-out motion-reduce:transition-none"
+          >
+            More
+          </span>
+        ) : null}
       </button>
       {open ? (
         <div
@@ -651,14 +660,13 @@ function buttonClass(
   isLoading: boolean,
   phone: boolean,
   box?: string,
-  expanded = false,
 ) {
-  const size = box ?? (expanded ? "h-7 w-[calc(100%-12px)] shrink-0 grow-0" : phone ? "h-9 min-w-9 flex-1" : "size-7 shrink-0 grow-0");
+  const size = box ?? (phone ? "h-9 min-w-9 flex-1" : "h-7 w-[calc(100%-12px)] shrink-0 grow-0");
   const tone = isActive
     ? "bg-sidebar-accent text-sidebar-foreground"
     : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground";
   const loading = isLoading ? "opacity-55" : "";
-  const layout = expanded ? "grid-cols-[1.75rem_minmax(0,1fr)] justify-items-center gap-1.5 mx-[6px]" : "place-items-center";
+  const layout = phone ? "place-items-center" : "grid-cols-[1.75rem_minmax(0,1fr)] justify-items-center gap-1.5 mx-[6px]";
   return `grid ${size} ${layout} items-center rounded ${tone} ${loading}`;
 }
 

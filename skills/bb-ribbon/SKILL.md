@@ -15,6 +15,8 @@ description: 사이드바 리본 내비게이션. 데스크톱은 왼쪽 세로,
 
 등록은 `app.tsx`의 `experimental_sidebarNavigation`, id `ribbon`이다. 켜는 값은 `bb-ribbon/ribbon`이다. 설정 → Appearance → Navigation에서 기본 Navigation과 고른다.
 
-설정 → Ribbon의 `desktopHoverMode`는 두 가지다. 기본값 `스레드 목록 위에 겹치기`는 레일만 2.5rem에서 12rem으로 펼쳐져 스레드 위를 덮는다. `사이드바 너비 늘리기`는 레일과 전체 사이드바를 9.5rem씩 늘려 스레드 목록 너비를 유지한다. phone에는 이 설정을 적용하지 않는다.
+설정 → Ribbon의 `expandOnHover`는 데스크톱 hover 확장의 on/off 스위치이며 기본값은 `true`다. 리본은 2.5rem에서 12rem으로 펼쳐져 스레드 목록 위를 덮는다. 전체 사이드바와 스레드 목록 너비는 유지한다. 꺼져 있으면 아이콘 리본을 유지하고 버튼 `title`로 이름을 보여준다. phone에는 이 설정을 적용하지 않는다.
 
-화면을 바꾸는 등록은 `app.tsx`에 둔다. `server.ts`는 이 선택 설정을 선언한다. bb는 panel과 gap 각각에 `--sidebar-width`를 inline으로 둔다. 너비 늘리기는 두 요소를 함께 바꾸고, 접힘·phone 전환·unmount 시 원래 값과 transition을 복구한다. hover 중 사용자가 너비를 조절하면 최신 값을 보존한다. 리본을 호스트 grid로 옮겨도 scoped CSS가 적용되도록 리본 루트에 `experimental_usePluginId()`의 `data-bb-plugin` 값을 유지한다.
+확장과 접힘 동안 데스크톱 버튼은 동일한 두 열 grid를 유지한다. 레이블은 DOM에 계속 두고 opacity로 표시하며, 리본의 z-index도 닫히는 동안 유지한다. hover 상태에 따라 버튼 배치·레이블 mount·쌓임 순서를 바꾸면 전환 중 튄다. 너비는 200ms, 레이블 opacity는 150ms의 ease-out으로 전환한다. `prefers-reduced-motion`에서는 transition을 끈다.
+
+화면을 바꾸는 등록은 `app.tsx`에 둔다. `server.ts`는 이 스위치를 선언한다. 리본을 호스트 grid로 옮겨도 scoped CSS가 적용되도록 리본 루트에 `experimental_usePluginId()`의 `data-bb-plugin` 값을 유지한다.
