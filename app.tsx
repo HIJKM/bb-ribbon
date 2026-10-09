@@ -2,7 +2,9 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties
 import { createPortal } from "react-dom";
 import {
   definePluginApp,
+  useSettings,
   experimental_Icon as Icon,
+  experimental_usePluginId,
   experimental_SidebarNavigationIcon as NavigationIcon,
   experimental_useSidebarNavigation,
   experimental_useSidebarNavigationSplit,
@@ -12,14 +14,25 @@ import {
 import { fitVisibleCount, readCssPx } from "./ribbon-fit";
 import { postRibbonTap, readHapticBridge, ribbonTapKind } from "./ribbon-haptic";
 import { useDeviceChrome } from "./use-device.ts";
+import { expandSidebarWidth, PUSH_MODE } from "./ribbon-expansion";
 
 function RibbonNavigation(_props: ExperimentalSidebarNavigationProps) {
   const { actions, activeItemId, isShortcutModifierHeld, items } =
     experimental_useSidebarNavigation();
+  const pluginId = experimental_usePluginId();
   const { device } = useDeviceChrome();
   const phone = device === "phone";
   const railRef = useRef<HTMLDivElement>(null);
-  useRibbonPlacement(railRef, items.length > 0, phone);
+  const { values } = useSettings();
+  const push = values?.desktopHoverMode === PUSH_MODE;
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const expanded = !phone && (hovered || focused);
+  useEffect(() => {
+    setHovered(false);
+    setFocused(false);
+  }, [phone]);
+  useRibbonPlacement(railRef, items.length > 0, phone, expanded, push);
   const visible = items.filter((item) => item.isVisible);
   const hidden = items.filter((item) => !item.isVisible);
   const fitted = useFittedCount(
@@ -38,13 +51,29 @@ function RibbonNavigation(_props: ExperimentalSidebarNavigationProps) {
     <div
       ref={railRef}
       data-bb-sidebar-ribbon=""
+      data-bb-plugin={pluginId}
       role="toolbar"
       aria-label="Sidebar"
       data-ribbon-axis={phone ? "x" : "y"}
+      data-ribbon-expanded={expanded}
+      onMouseEnter={() => { if (!phone) setHovered(true); }}
+      onMouseLeave={() => setHovered(false)}
+      onPointerDownCapture={() => setFocused(false)}
+      onFocusCapture={(event) => {
+        if (!phone && event.target.matches(":focus-visible")) setFocused(true);
+      }}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false);
+      }}
+      style={phone ? undefined : {
+        width: expanded ? EXPANDED_RAIL_COLUMN : RAIL_COLUMN,
+        position: "relative",
+        zIndex: expanded ? 30 : undefined,
+      }}
       className={
         phone
           ? "flex h-auto w-full min-w-0 flex-row items-center gap-0 overflow-hidden bg-sidebar py-1 pl-[12px] pr-2"
-          : "flex min-h-0 w-full flex-col items-center gap-0.5 self-stretch overflow-hidden border-r border-sidebar-border/25 bg-sidebar py-1"
+          : "flex min-h-0 flex-col items-center gap-0.5 self-stretch overflow-hidden border-r border-sidebar-border/25 bg-sidebar py-1 transition-[width] duration-150 ease-out motion-reduce:transition-none"
       }
     >
       {shown.map((item) => (
@@ -53,6 +82,7 @@ function RibbonNavigation(_props: ExperimentalSidebarNavigationProps) {
           item={item}
           isActive={item.id === activeItemId && item.action.kind !== "new-thread"}
           phone={phone}
+          expanded={expanded}
           showShortcut={isShortcutModifierHeld}
           onActivate={(openInSplit) => actions.activate(item.id, { openInSplit })}
           onCustomize={() => actions.openCustomize()}
@@ -61,6 +91,7 @@ function RibbonNavigation(_props: ExperimentalSidebarNavigationProps) {
       <RibbonOverflow
         items={overflow}
         phone={phone}
+        expanded={expanded}
         openBelow={phone}
         onActivate={(itemId, openInSplit) => {
           actions.activate(itemId, { openInSplit });
@@ -72,6 +103,8 @@ function RibbonNavigation(_props: ExperimentalSidebarNavigationProps) {
 }
 
 const RAIL_COLUMN = "2.5rem";
+const EXPANDED_RAIL_COLUMN = "12rem";
+const RAIL_EXPANSION = "9.5rem";
 const STYLE_PROPS = [
   "display",
   "grid-template-columns",
@@ -89,6 +122,8 @@ function useRibbonPlacement(
   railRef: RefObject<HTMLDivElement | null>,
   active: boolean,
   phone: boolean,
+  expanded: boolean,
+  push: boolean,
 ) {
   const homeRef = useRef<{ parent: Node; next: ChildNode | null } | null>(null);
   const originalsRef = useRef(new Map<HTMLElement, Map<string, string>>());
@@ -156,7 +191,7 @@ function useRibbonPlacement(
 
       rememberStyle(originalsRef.current, host);
       host.style.display = "grid";
-      host.style.gridTemplateColumns = `${RAIL_COLUMN} minmax(0, 1fr)`;
+      host.style.gridTemplateColumns = `${expanded && push ? EXPANDED_RAIL_COLUMN : RAIL_COLUMN} minmax(0, 1fr)`;
       host.style.gridTemplateRows = "auto auto minmax(0, 1fr) auto";
       host.style.flexDirection = "";
       host.style.paddingLeft = "";
@@ -204,6 +239,14 @@ function useRibbonPlacement(
     }
     return () => observer.disconnect();
   });
+
+  useLayoutEffect(() => {
+    if (!active || phone || !expanded || !push) return;
+    const host = railRef.current && findRailHost(railRef.current);
+    const shell = host?.closest<HTMLElement>('[data-side="left"]');
+    if (!shell?.parentElement) return;
+    return expandSidebarWidth(shell, RAIL_EXPANSION);
+  }, [active, phone, expanded, push, railRef]);
 }
 
 function restorePlacement(
@@ -334,60 +377,11 @@ function place(
   element.style.gridRow = row;
 }
 
-function RibbonNamePopover({
-  label,
-  anchor,
-  id,
-}: {
-  label: string;
-  anchor: HTMLElement;
-  id: string;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [box, setBox] = useState<{ top: number; left: number } | null>(null);
-
-  useLayoutEffect(() => {
-    const place = () => {
-      const tip = ref.current;
-      if (!tip) return;
-      const button = anchor.getBoundingClientRect();
-      const tipBox = tip.getBoundingClientRect();
-      const margin = 8;
-      let top = button.top + button.height / 2 - tipBox.height / 2;
-      const maxTop = window.innerHeight - margin - tipBox.height;
-      top = Math.min(Math.max(margin, top), Math.max(margin, maxTop));
-      let left = button.right + 8;
-      if (left + tipBox.width > window.innerWidth - margin) {
-        left = Math.max(margin, button.left - margin - tipBox.width);
-      }
-      setBox((prev) => (prev && prev.top === top && prev.left === left ? prev : { top, left }));
-    };
-    place();
-    window.addEventListener("scroll", place, true);
-    window.addEventListener("resize", place);
-    return () => {
-      window.removeEventListener("scroll", place, true);
-      window.removeEventListener("resize", place);
-    };
-  }, [anchor, label]);
-
-  return (
-    <div
-      ref={ref}
-      id={id}
-      role="tooltip"
-      style={{ top: box?.top ?? 0, left: box?.left ?? 0, visibility: box ? "visible" : "hidden" }}
-      className="pointer-events-none fixed z-50 max-w-60 truncate rounded-md border border-border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-md"
-    >
-      {label}
-    </div>
-  );
-}
-
 function RibbonButton({
   item,
   isActive,
   phone,
+  expanded,
   showShortcut,
   onActivate,
   onCustomize,
@@ -395,6 +389,7 @@ function RibbonButton({
   item: ExperimentalSidebarNavigationItem;
   isActive: boolean;
   phone: boolean;
+  expanded: boolean;
   showShortcut: boolean;
   onActivate: (openInSplit: boolean) => void;
   onCustomize: () => void;
@@ -403,9 +398,7 @@ function RibbonButton({
   const label = itemLabel(item, showShortcut);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const tipId = useId();
-  const [hover, setHover] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ left: number; top: number } | null>(null);
-  const showTip = hover && !phone && buttonRef.current !== null;
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -445,7 +438,6 @@ function RibbonButton({
         type="button"
         title={phone ? label : undefined}
         aria-label={label}
-        aria-describedby={showTip ? tipId : undefined}
         aria-current={isActive ? "page" : undefined}
         aria-busy={item.isLoading || undefined}
         aria-keyshortcuts={item.shortcut?.ariaKeyShortcuts}
@@ -454,25 +446,12 @@ function RibbonButton({
         onPointerDown={composeRibbonPointerDown(phone, splitProps.onPointerDown)}
         onClick={(event) => onActivate(event.metaKey || event.ctrlKey)}
         onContextMenu={openContextMenu}
-        onMouseEnter={() => {
-          if (!phone) setHover(true);
-        }}
-        onMouseLeave={() => setHover(false)}
-        onFocus={() => {
-          if (!phone) setHover(true);
-        }}
-        onBlur={() => setHover(false)}
         data-ribbon-item=""
-        className={buttonClass(isActive, item.isLoading, phone)}
+        className={buttonClass(isActive, item.isLoading, phone, undefined, expanded)}
       >
         <NavigationIcon icon={item.icon} className={glyphClass(phone)} />
+        {expanded ? <span data-ribbon-label="" className="min-w-0 justify-self-stretch truncate text-left text-xs" title={label}>{label}</span> : null}
       </button>
-      {showTip && buttonRef.current
-        ? createPortal(
-            <RibbonNamePopover label={label} anchor={buttonRef.current} id={tipId} />,
-            document.body,
-          )
-        : null}
       {contextMenu
         ? createPortal(
             <div
@@ -501,12 +480,14 @@ function RibbonButton({
 function RibbonOverflow({
   items,
   phone,
+  expanded,
   openBelow,
   onActivate,
   onCustomize,
 }: {
   items: readonly ExperimentalSidebarNavigationItem[];
   phone: boolean;
+  expanded: boolean;
   openBelow: boolean;
   onActivate: (itemId: string, openInSplit: boolean) => void;
   onCustomize: () => void;
@@ -533,7 +514,7 @@ function RibbonOverflow({
   return (
     <div
       ref={rootRef}
-      className={phone ? "relative h-9 min-w-9 flex-1" : "relative shrink-0"}
+      className={phone ? "relative h-9 min-w-9 flex-1" : expanded ? "relative w-full shrink-0" : "relative shrink-0"}
     >
       <button
         type="button"
@@ -548,6 +529,7 @@ function RibbonOverflow({
           false,
           phone,
           phone ? "h-full w-full" : undefined,
+          expanded,
         )}
       >
         <Icon
@@ -555,6 +537,7 @@ function RibbonOverflow({
           className={glyphClass(phone)}
           aria-hidden="true"
         />
+        {expanded ? <span className="min-w-0 justify-self-stretch truncate text-left text-xs">More</span> : null}
       </button>
       {open ? (
         <div
@@ -668,13 +651,15 @@ function buttonClass(
   isLoading: boolean,
   phone: boolean,
   box?: string,
+  expanded = false,
 ) {
-  const size = box ?? (phone ? "h-9 min-w-9 flex-1" : "size-7 shrink-0 grow-0");
+  const size = box ?? (expanded ? "h-7 w-[calc(100%-12px)] shrink-0 grow-0" : phone ? "h-9 min-w-9 flex-1" : "size-7 shrink-0 grow-0");
   const tone = isActive
     ? "bg-sidebar-accent text-sidebar-foreground"
     : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground";
   const loading = isLoading ? "opacity-55" : "";
-  return `grid ${size} place-items-center rounded ${tone} ${loading}`;
+  const layout = expanded ? "grid-cols-[1.75rem_minmax(0,1fr)] justify-items-center gap-1.5 mx-[6px]" : "place-items-center";
+  return `grid ${size} ${layout} items-center rounded ${tone} ${loading}`;
 }
 
 function glyphClass(phone: boolean) {

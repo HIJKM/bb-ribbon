@@ -11,5 +11,5 @@
     "allowImportingTsExtensions": true,
     "skipLibCheck": true
   },
-  "include": ["server.ts", "app.tsx", "ribbon-fit.ts", "ribbon-fit.test.ts", "ribbon-haptic.ts", "ribbon-haptic.test.ts"]
+  "include": ["server.ts", "app.tsx", "ribbon-fit.ts", "ribbon-fit.test.ts", "ribbon-haptic.ts", "ribbon-haptic.test.ts", "app.test.tsx", "ribbon-expansion.ts", "ribbon-expansion.test.ts"]
 }

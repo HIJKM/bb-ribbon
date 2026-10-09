@@ -18,7 +18,7 @@ A BB plugin that replaces the default sidebar navigation with a compact icon rib
 Desktop uses a vertical rail on the left; compact viewports use a horizontal strip above the thread list.
 Open/close motion stays in `sidebar`; thread row styling stays in `bb-thread-theme`.
 
-- **desktop** — vertical icon rail; hover/focus shows the name in a popover beside the icon
+- **desktop** — vertical icon rail; hover/keyboard focus expands the rail to show labels
 - **mobile** — horizontal icon strip; labels via button `title`; `impact-light` on tap when available
 - **overflow** — a `...` control always stays; overflow and hidden items go into More
 - **customize** — open BB’s Customize sidebar from the icon context menu (or More)
@@ -44,6 +44,13 @@ bb plugin install 'git:https://github.com/HIJKM/bb-ribbon.git@main' --yes
 Plugin id: `bb-ribbon`.
 
 Enable it in **Settings → Appearance → Navigation** (value `bb-ribbon/ribbon`).
+
+Choose the desktop hover behavior in **Settings → Ribbon → 데스크톱 리본 hover 동작**:
+
+- **스레드 목록 위에 겹치기** (default) — the expanded ribbon temporarily covers the thread list.
+- **사이드바 너비 늘리기** — the sidebar grows with the ribbon, keeping the thread list width unchanged.
+
+The ribbon collapses when the pointer and keyboard focus leave it. Phone navigation keeps its horizontal layout.
 
 ## what it does
 
