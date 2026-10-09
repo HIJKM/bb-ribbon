@@ -50,7 +50,7 @@ describe('desktop ribbon hover', () => {
   it('reveals labels over threads, keeps sidebar width, and collapses on leave', () => {
     const { rail, shell, host } = mount();
     assert.equal(rail.getAttribute('data-bb-plugin'), 'bb-ribbon');
-    fireEvent.mouseEnter(rail);
+    fireEvent.mouseEnter(rail.querySelector('button')!);
     assert.equal(rail.dataset.ribbonExpanded, 'true');
     assert.equal(rail.style.width, '12rem');
     assert.equal(host.style.gridTemplateColumns, '2.5rem minmax(0, 1fr)');
@@ -91,7 +91,42 @@ describe('desktop ribbon hover', () => {
     assert.equal(rail.style.width, '2.5rem');
     assert.equal(panel.style.getPropertyValue('--sidebar-width'), '320px');
     assert.equal(host.style.gridTemplateColumns, '2.5rem minmax(0, 1fr)');
-    assert.equal(rail.querySelector('button')!.title, 'Tasks');
+    assert.equal(rail.querySelector('button')!.title, '');
+  });
+
+  it('shows the existing adjacent tooltip on hover when expansion is disabled', () => {
+    const { rail } = mount(false);
+    const item = rail.querySelector('button')!;
+    fireEvent.mouseEnter(item);
+    const tooltip = document.querySelector<HTMLElement>('[role="tooltip"]');
+    assert.ok(tooltip, 'hover should show a custom tooltip');
+    assert.equal(tooltip.textContent, 'Tasks');
+    assert.equal(item.getAttribute('aria-describedby'), tooltip.id);
+    assert.equal(tooltip.getAttribute('data-bb-plugin'), 'bb-ribbon');
+    assert.equal(tooltip.parentElement, document.body, 'tooltip escapes the clipped rail');
+    assert.equal(rail.dataset.ribbonExpanded, 'false');
+    fireEvent.mouseLeave(item);
+    assert.equal(document.querySelector('[role="tooltip"]'), null);
+    assert.equal(item.getAttribute('aria-describedby'), null);
+  });
+
+  it('shows the tooltip on keyboard focus when expansion is disabled', () => {
+    const { rail } = mount(false);
+    const item = rail.querySelector('button')!;
+    act(() => item.focus());
+    assert.equal(document.querySelector('[role="tooltip"]')?.textContent, 'Tasks');
+    act(() => item.blur());
+    assert.equal(document.querySelector('[role="tooltip"]'), null);
+  });
+
+  it('keeps phone titles without desktop tooltips when expansion is disabled', () => {
+    phone = true;
+    const { rail } = mount(false);
+    const item = rail.querySelector('button')!;
+    fireEvent.mouseEnter(item);
+    act(() => item.focus());
+    assert.equal(item.title, 'Tasks');
+    assert.equal(document.querySelector('[role="tooltip"]'), null);
   });
 
   it('stays expanded during keyboard navigation and closes when focus leaves', () => {

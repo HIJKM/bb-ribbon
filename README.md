@@ -46,6 +46,7 @@ Plugin id: `bb-ribbon`.
 Enable it in **Settings → Appearance → Navigation** (value `bb-ribbon/ribbon`).
 
 Toggle desktop hover expansion in **Settings → Ribbon → 데스크톱 리본 hover 확장** (enabled by default).
+When disabled, hovering or focusing a navigation icon shows its name in the existing tooltip beside the rail.
 The ribbon expands over the thread list and fades labels in; it collapses when the pointer and keyboard focus leave. Icons stay in place throughout the transition. Phone navigation keeps its horizontal layout.
 
 ## what it does

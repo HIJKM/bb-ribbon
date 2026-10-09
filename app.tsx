@@ -389,6 +389,8 @@ function RibbonButton({
   const label = itemLabel(item, showShortcut);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const tipId = useId();
+  const [hover, setHover] = useState(false);
+  const showTip = hover && !phone && !expandOnHover && buttonRef.current !== null;
   const [contextMenu, setContextMenu] = useState<{ left: number; top: number } | null>(null);
 
   useEffect(() => {
@@ -427,8 +429,9 @@ function RibbonButton({
       <button
         ref={buttonRef}
         type="button"
-        title={phone || !expandOnHover ? label : undefined}
+        title={phone ? label : undefined}
         aria-label={label}
+        aria-describedby={showTip ? tipId : undefined}
         aria-current={isActive ? "page" : undefined}
         aria-busy={item.isLoading || undefined}
         aria-keyshortcuts={item.shortcut?.ariaKeyShortcuts}
@@ -437,6 +440,10 @@ function RibbonButton({
         onPointerDown={composeRibbonPointerDown(phone, splitProps.onPointerDown)}
         onClick={(event) => onActivate(event.metaKey || event.ctrlKey)}
         onContextMenu={openContextMenu}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        onFocus={() => setHover(true)}
+        onBlur={() => setHover(false)}
         data-ribbon-item=""
         className={buttonClass(isActive, item.isLoading, phone)}
       >
@@ -453,6 +460,12 @@ function RibbonButton({
           </span>
         ) : null}
       </button>
+      {showTip && buttonRef.current
+        ? createPortal(
+            <RibbonNamePopover label={label} anchor={buttonRef.current} id={tipId} />,
+            document.body,
+          )
+        : null}
       {contextMenu
         ? createPortal(
             <div
@@ -475,6 +488,50 @@ function RibbonButton({
           )
         : null}
     </>
+  );
+}
+
+function RibbonNamePopover({ label, anchor, id }: { label: string; anchor: HTMLElement; id: string }) {
+  const pluginId = experimental_usePluginId();
+  const ref = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState<{ top: number; left: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const place = () => {
+      const tip = ref.current;
+      if (!tip) return;
+      const button = anchor.getBoundingClientRect();
+      const tipBox = tip.getBoundingClientRect();
+      const margin = 8;
+      let top = button.top + button.height / 2 - tipBox.height / 2;
+      const maxTop = window.innerHeight - margin - tipBox.height;
+      top = Math.min(Math.max(margin, top), Math.max(margin, maxTop));
+      let left = button.right + 8;
+      if (left + tipBox.width > window.innerWidth - margin) {
+        left = Math.max(margin, button.left - margin - tipBox.width);
+      }
+      setBox((previous) => previous && previous.top === top && previous.left === left ? previous : { top, left });
+    };
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [anchor, label]);
+
+  return (
+    <div
+      ref={ref}
+      id={id}
+      role="tooltip"
+      data-bb-plugin={pluginId}
+      style={{ top: box?.top ?? 0, left: box?.left ?? 0, visibility: box ? "visible" : "hidden" }}
+      className="pointer-events-none fixed z-50 max-w-60 truncate rounded-md border border-border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-md"
+    >
+      {label}
+    </div>
   );
 }
 

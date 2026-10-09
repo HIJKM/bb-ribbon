@@ -15,7 +15,7 @@ description: 사이드바 리본 내비게이션. 데스크톱은 왼쪽 세로,
 
 등록은 `app.tsx`의 `experimental_sidebarNavigation`, id `ribbon`이다. 켜는 값은 `bb-ribbon/ribbon`이다. 설정 → Appearance → Navigation에서 기본 Navigation과 고른다.
 
-설정 → Ribbon의 `expandOnHover`는 데스크톱 hover 확장의 on/off 스위치이며 기본값은 `true`다. 리본은 2.5rem에서 12rem으로 펼쳐져 스레드 목록 위를 덮는다. 전체 사이드바와 스레드 목록 너비는 유지한다. 꺼져 있으면 아이콘 리본을 유지하고 버튼 `title`로 이름을 보여준다. phone에는 이 설정을 적용하지 않는다.
+설정 → Ribbon의 `expandOnHover`는 데스크톱 hover 확장의 on/off 스위치이며 기본값은 `true`다. 리본은 2.5rem에서 12rem으로 펼쳐져 스레드 목록 위를 덮는다. 전체 사이드바와 스레드 목록 너비는 유지한다. 꺼져 있으면 아이콘 리본을 유지하고 hover 또는 키보드 포커스 시 아이콘 옆에 기존 툴팁으로 이름을 보여준다. 툴팁은 리본에 잘리지 않도록 `document.body`에 portal로 표시하고 `data-bb-plugin`으로 스타일 범위를 유지한다. phone에는 이 설정을 적용하지 않는다.
 
 확장과 접힘 동안 데스크톱 버튼은 동일한 두 열 grid를 유지한다. 레이블은 DOM에 계속 두고 opacity로 표시하며, 리본의 z-index도 닫히는 동안 유지한다. hover 상태에 따라 버튼 배치·레이블 mount·쌓임 순서를 바꾸면 전환 중 튄다. 너비는 200ms, 레이블 opacity는 150ms의 ease-out으로 전환한다. `prefers-reduced-motion`에서는 transition을 끈다.
 
